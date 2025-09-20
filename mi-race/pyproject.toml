@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mi-race"                  
+version = "0.1.0"
+description = "Generic CLI and models for HDF5-based ML "
+readme = "README.md"               
+license = { file = "LICENSE" }     
+requires-python = ">=3.9"
+authors = [{ name = "CLI for Machine Learning Project" }]
+dependencies = [
+  "numpy",
+  "pandas",
+  "h5py",
+  "scikit-learn",
+  "matplotlib",
+  "seaborn",
+  "torch",
+  "tabulate"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mi_race*"]            
+
+[project.scripts]
+mi-race = "mi_race.cli.main:main"   
