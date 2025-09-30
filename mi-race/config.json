@@ -1,0 +1,38 @@
+{
+    "data": {
+        "path": "processed_data/iris_ds.csv",
+        "x_cols": ["petal_length", "petal_width", "sepal_length", "sepal_width"], 
+        "y_col": "species"
+    },
+
+    "model": {
+        "mlp": {
+            "type": "mlp",
+            "hidden_layers": [128, 128],
+            "activation": "relu",
+            "solver": "adam",
+            "learning_rate_init": 0.001,
+            "alpha": 0.0001,
+            "batch_size": "auto"
+        },
+        "cnn": {
+            "type": "cnn",
+            "channels": [16, 32],
+            "kernel_size": 5,
+            "pool": 2,
+            "fc": 128,
+            "epochs": 5,
+            "lr": 0.001,
+            "batch_size": 64
+        }
+    },
+    "train": {
+        "test_size": 0.2,
+        "random_state": 42,
+        "max_iter": 500,
+        "standardize": true
+    },
+    "output": {
+        "dir": "outputs"
+    }
+}
