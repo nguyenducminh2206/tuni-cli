@@ -33,5 +33,11 @@ def main() -> None:
     p_load.add_argument("--label", help="label column name to count classes", default=None)
     p_load.set_defaults(func=_load_cmd)
 
+    # mi-race run <model> [-c mi-race.json]
+    p_run = sub.add_parser("run", help="train/evaluate a model from json config")
+    p_run.add_argument("--model", choices=["mlp", "cnn"], help="model selection")
+    p_run.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_run.set_defaults(func=run_cmd)
+
     args = parser.parse_args()
     args.func(args)
