@@ -9,6 +9,9 @@ __pycache__/
 # h5 file
 *.h5
 
+# Output csv for confusion matrix
+output/
+
 # Distribution / packaging
 .Python
 build/
