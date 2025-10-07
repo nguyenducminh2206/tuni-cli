@@ -63,8 +63,8 @@ mi-race load processed_data/iris_ds.csv --label species
   "data": {
     "path": "processed_data/example_df.parquet",
     "y_col": "dis_to_target",
-    "x_cols": ["cMax", "cVar", "time_trace"],
-    "sequence_mode": "stats"
+    "x_cols": ["time_trace_0:time_trace_99", "cMax", "cVar"],
+    "sequence_mode": "split"
   },
   "model": {
     "type": "mlp",
@@ -93,9 +93,13 @@ mi-race load processed_data/iris_ds.csv --label species
 - **`id`**: alternative to `path` (explicit dataset id). One of `path` or `id` is required.
 - **`y_col`**: label/target column (must exist).
 - **`x_cols`**/**`x_col`**: feature columns. If omitted, all **numeric** columns except `y_col` are used.
+  - Supports **column ranges** for split sequence columns: Use `"prefix_start:prefix_end"` notation to select a range of columns.
+  - Example: `"time_trace_1:time_trace_50"` selects columns `time_trace_1` through `time_trace_50`.
+  - Can mix ranges with regular column names: `["time_trace_10:time_trace_100", "cMax", "cVar"]`
 - **`sequence_mode`**:
   - `"stats"` (default): sequence‑like columns (Python list/ndarray) are expanded into statistical features:
     - `len, mean, std, min, max, q10, q25, q50, q75, q90`
+  - `"split"`: sequence‑like columns are split into individual columns (e.g., `time_trace_0`, `time_trace_1`, etc.). Each element of the sequence becomes a separate feature column, preserving all temporal information.
   - `"ignore"`: sequence‑like columns are skipped.
 
 > **Note**: If you load **CSV** files where sequence columns are stored as **strings** (e.g., `"[1.0, 1.1, ...]"`), convert them to real lists first or use Parquet/PKL to preserve list/array types. The summarizer detects Python lists/arrays, not strings.
@@ -147,14 +151,14 @@ Accuracy: 41.65%
 Macro F1: 30.12%
 
 === Confusion Matrix (test) ===
-|    |   0 |   1 |   2 |    3 |   4 |   5 |
-|----|-----|-----|-----|------|-----|-----|
-|  0 |  83 |   9 |   1 |    2 |   1 |   0 |
-|  1 |   3 | 282 |  52 |  209 |  28 |   2 |
-|  2 |   0 | 115 | 193 |  757 |  84 |   3 |
-|  3 |   1 | 139 | 160 | 1285 | 137 |   6 |
-|  4 |   0 |  65 |  76 |  702 | 115 |   2 |
-|  5 |   0 |   9 |  13 |  145 |  24 |   1 |
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |    86     7     1     2     0     0
+  1 |     0   388    81    69    35     3
+  2 |     0    71   433   426   197    25
+  3 |     2    82   380   750   444    70
+  4 |     0    52   170   386   295    57
+  5 |     0     6    39    86    51    10
 
 === Classification Report (test) ===
 precision recall f1-score support
