@@ -4,7 +4,6 @@ from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
-from tabulate import tabulate
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
@@ -12,6 +11,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.metrics import confusion_matrix, accuracy_score, classification_report
 
 from ..data.extract_data import build_df
+
 
 
 def _load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
@@ -80,6 +80,60 @@ def _summarize_sequence_col(series: pd.Series, prefix: str) -> pd.DataFrame:
     }, **qs })
 
 
+def _split_sequence_col(series: pd.Series, prefix: str) -> pd.DataFrame:
+    """
+    Split a column of sequences (list/array) into multiple columns.
+    Each time point becomes a separate column with the pattern: prefix_0, prefix_1, etc.
+    Returns a DataFrame with individual time point columns.
+    """
+    def safe_array(x):
+        if isinstance(x, (list, tuple, np.ndarray)):
+            arr = np.asarray(x, dtype=float)
+            return arr
+        return np.array([], dtype=float)
+
+    arrays = series.apply(safe_array)
+    
+    # Find the maximum length across all sequences to determine number of columns
+    max_length = arrays.apply(len).max()
+    
+    if max_length == 0:
+        # All sequences are empty, return empty DataFrame
+        return pd.DataFrame()
+    
+    # Create columns for each time point
+    split_data = {}
+    for i in range(max_length):
+        col_name = f"{prefix}_{i}"
+        # Extract the i-th element from each sequence, fill with NaN if sequence is too short
+        split_data[col_name] = arrays.apply(lambda arr: arr[i] if i < len(arr) else np.nan)
+    
+    return pd.DataFrame(split_data)
+
+
+def _extract_sequence_range(series: pd.Series, prefix: str, start_idx: int, end_idx: int) -> pd.DataFrame:
+    """
+    Extract a specific range from a sequence column.
+    Returns a DataFrame with columns like prefix_start, prefix_start+1, ..., prefix_end.
+    """
+    def safe_array(x):
+        if isinstance(x, (list, tuple, np.ndarray)):
+            arr = np.asarray(x, dtype=float)
+            return arr
+        return np.array([], dtype=float)
+
+    arrays = series.apply(safe_array)
+    
+    # Create columns for the specified range
+    split_data = {}
+    for i in range(start_idx, end_idx + 1):
+        col_name = f"{prefix}_{i}"
+        # Extract the i-th element from each sequence, fill with NaN if sequence is too short
+        split_data[col_name] = arrays.apply(lambda arr: arr[i] if i < len(arr) else np.nan)
+    
+    return pd.DataFrame(split_data)
+
+
 def _summarize_cell(x, n_head=3, n_tail=3):
     # treat NaNs/None nicely
     if x is None or (isinstance(x, float) and pd.isna(x)):
@@ -114,9 +168,22 @@ def _ensure_outdir(path: Path):
 
 
 def _cm_table(cm: np.ndarray, labels) -> str:
-    headers = [""] + [str(_) for _ in labels]
-    rows = [[str(labels[i])] + [int(v) for v in cm[i]] for i in range(len(labels))]
-    return tabulate(rows, headers=headers, tablefmt="github")  
+    """Create a clean confusion matrix table without internal vertical bars."""
+    # Create header row
+    header_labels = [str(label) for label in labels]
+    header = "     " + "".join(f"{label:>6}" for label in header_labels)
+    
+    # Create separator line
+    separator = "    " + "-" * (6 * len(labels))
+    
+    # Create data rows
+    rows = []
+    for i, label in enumerate(labels):
+        row_values = "".join(f"{int(cm[i][j]):>6}" for j in range(len(labels)))
+        rows.append(f"{str(label):>3} |{row_values}")
+    
+    # Combine all parts
+    return "\n".join([header, separator] + rows)  
 
 
 def run_cmd(args):
@@ -169,30 +236,85 @@ def run_cmd(args):
     if not x_cols:
         raise SystemExit("[mi-race] No feature columns resolved.")
 
-    # Validate existence
-    missing = [c for c in x_cols if c not in df.columns]
-    if missing:
-        raise SystemExit(f"[mi-race] Missing feature columns: {missing}. Available: {df.columns.tolist()}")
-    if y_col in x_cols:
-        raise SystemExit(f"[mi-race] y_col '{y_col}' cannot be among x_cols.")
-
-    # Handle sequence columns (like 'time_trace')
-    # If a column has Python objects that are list/array, convert to stats
-    seq_mode = data_cfg.get("sequence_mode", "stats")  # 'stats' | 'ignore'
+    # Handle sequence columns and time trace ranges
+    seq_mode = data_cfg.get("sequence_mode", "stats")  # 'stats' | 'ignore' | 'split'
     new_feature_frames = []
     keep_cols = []
+    
+    # Check if any x_cols are time trace ranges (like "time_trace_1:time_trace_50")
+    time_trace_ranges = []
+    regular_cols = []
+    
     for c in x_cols:
+        if ":" in c and c.startswith("time_trace_"):
+            # This is a time trace range specification
+            time_trace_ranges.append(c)
+        else:
+            regular_cols.append(c)
+    
+    # Validate existence of regular columns only (time trace ranges are handled separately)
+    missing = [c for c in regular_cols if c not in df.columns]
+    if missing:
+        raise SystemExit(f"[mi-race] Missing feature columns: {missing}. Available: {df.columns.tolist()}")
+    if y_col in regular_cols:
+        raise SystemExit(f"[mi-race] y_col '{y_col}' cannot be among x_cols.")
+    
+    # Process time trace ranges first
+    if time_trace_ranges:
+        if "time_trace" not in df.columns:
+            raise SystemExit("[mi-race] time_trace column not found in dataset, but time trace ranges were specified.")
+        
+        time_trace_series = df["time_trace"]
+        for range_spec in time_trace_ranges:
+            try:
+                # Parse range like "time_trace_1:time_trace_50"
+                parts = range_spec.split(":")
+                if len(parts) != 2:
+                    raise ValueError("Invalid range format")
+                
+                start_part = parts[0].split("_")[-1]  # Extract "1" from "time_trace_1"
+                end_part = parts[1].split("_")[-1]    # Extract "50" from "time_trace_50"
+                
+                start_idx = int(start_part)
+                end_idx = int(end_part)
+                
+                if start_idx > end_idx:
+                    raise ValueError("Start index must be <= end index")
+                
+                # Extract the specified range from time_trace
+                range_df = _extract_sequence_range(time_trace_series, "time_trace", start_idx, end_idx)
+                if not range_df.empty:
+                    new_feature_frames.append(range_df)
+                    print(f"[mi-race] Extracted time trace range {range_spec}: {len(range_df.columns)} columns ({range_df.columns[0]} to {range_df.columns[-1]})")
+                else:
+                    print(f"[mi-race] Time trace range {range_spec} was empty, skipping")
+                    
+            except (ValueError, IndexError) as e:
+                raise SystemExit(f"[mi-race] Invalid time trace range specification '{range_spec}': {e}")
+    
+    # Process regular columns (including full time_trace if specified)
+    for c in regular_cols:
+        if c not in df.columns:
+            continue  # Will be caught later in validation
+            
         s = df[c]
         if s.dtype == object and s.head(5).apply(lambda v: isinstance(v, (list, tuple, np.ndarray))).all():
             if seq_mode == "stats":
                 stats_df = _summarize_sequence_col(s, c)
                 new_feature_frames.append(stats_df)
                 print(f"[mi-race] Sequence column '{c}' converted to stats: {stats_df.columns.tolist()}")
+            elif seq_mode == "split":
+                split_df = _split_sequence_col(s, c)
+                if not split_df.empty:
+                    new_feature_frames.append(split_df)
+                    print(f"[mi-race] Sequence column '{c}' split into {len(split_df.columns)} columns: {split_df.columns.tolist()}")
+                else:
+                    print(f"[mi-race] Sequence column '{c}' was empty, skipping split")
             elif seq_mode == "ignore":
                 print(f"[mi-race] Ignoring sequence column '{c}'")
                 continue
             else:
-                raise SystemExit(f"[mi-race] Unknown sequence_mode '{seq_mode}'")
+                raise SystemExit(f"[mi-race] Unknown sequence_mode '{seq_mode}'. Supported: 'stats', 'split', 'ignore'")
         else:
             keep_cols.append(c)
 
@@ -200,9 +322,19 @@ def run_cmd(args):
     if new_feature_frames:
         for fdf in new_feature_frames:
             feature_df = pd.concat([feature_df, fdf], axis=1)
+    
+    pd.DataFrame(feature_df)
 
     resolved_feature_cols = feature_df.columns.tolist()
     print(f"[mi-race] Final feature columns (n={len(resolved_feature_cols)}): {resolved_feature_cols}")
+
+    # Save feature_df to CSV file
+    out_cfg = cfg.get("output", {})
+    out_dir = Path(out_cfg.get("dir", "outputs"))
+    _ensure_outdir(out_dir)
+    feature_df_path = out_dir / "processed_features.csv"
+    feature_df.to_csv(feature_df_path, index=False)
+    print(f"[mi-race] Saved processed features to: {feature_df_path}")
 
     # Build arrays
     X = feature_df.to_numpy()
@@ -288,7 +420,7 @@ def run_cmd(args):
     print("\n=== Confusion Matrix (test) ===")
     print(_cm_table(cm, n_classes))
 
-    # Optional classification report
+    # Classification report
     if cfg.get("output", {}).get("show_report", True):
         print("\n=== Classification Report (test) ===")
         print(classification_report(y_test, y_pred, digits=4))

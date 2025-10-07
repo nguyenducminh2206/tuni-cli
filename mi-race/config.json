@@ -1,8 +1,9 @@
 {
     "data": {
-        "path": "processed_data/iris_ds.csv",
-        "x_cols": ["petal_length", "petal_width", "sepal_length", "sepal_width"], 
-        "y_col": "species"
+        "path": "data_7x7",
+        "x_cols": ["time_trace_5:time_trace_50", "cMax"], 
+        "y_col": "dis_to_target",
+        "sequence_mode": "split"
     },
 
     "model": {
@@ -33,6 +34,7 @@
         "standardize": true
     },
     "output": {
-        "dir": "outputs"
+        "dir": "outputs",
+        "show_report": true
     }
 }
