@@ -13,11 +13,11 @@ A lightweight command‑line tool to train and evaluate ML models directly from 
 
 ### Windows (PowerShell)
 ```powershell
-python -m venv .venv          # create virtual environment
-.\.venv\Scripts\activate      # activate it
-python -m pip install -U pip  # upgrade pip (optional but good practice)
+python -m venv .venv              # create virtual environment
+.\.venv\Scripts\activate          # activate it
+python -m pip install -U pip      # upgrade pip (optional but good practice)
 pip install -r requirements.txt
-pip install -e .              # editable install to use `mi-race` CLI
+pip install -e .                  # editable install to use `mi-race` CLI
 ```
 
 ### macOS / Linux
@@ -61,10 +61,10 @@ mi-race load processed_data/iris_ds.csv --label species
 ```json
 {
   "data": {
-    "path": "processed_data/example_df.parquet",
-    "y_col": "dis_to_target",
-    "x_cols": ["time_trace_0:time_trace_99", "cMax", "cVar"],
-    "sequence_mode": "split"
+    "path": "data_7x7",       // path/to_your/dataset
+    "y_col": "dis_to_target", // labels for the model
+    "x_cols": ["time_trace_0:time_trace_99", "cMax", "cVar"], // inputs for the model
+    "sequence_mode": "split" // 3 modes: "split" | "stats" | "ignore"
   },
   "model": {
     "type": "mlp",
