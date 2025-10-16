@@ -3,7 +3,7 @@ from importlib.metadata import version, PackageNotFoundError
 from mi_race.data.preview import preview_csv
 from mi_race.train.runner import run_cmd
 
-i
+
 def _pkg_version() -> str:
     for name in ("mi-race", "mi_race"):
         try:
