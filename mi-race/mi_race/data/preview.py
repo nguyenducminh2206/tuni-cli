@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import pandas as pd
 from tabulate import tabulate
-
+i
 def count_rows(csv_path: Path) -> int:
     with csv_path.open('r', encoding='utf-8', errors='ignore') as f:
         return sum(1 for _ in f) - 1
