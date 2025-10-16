@@ -1,3 +1,5 @@
+"""Runner function for CLI tool"""
+
 from pathlib import Path
 import json
 from collections.abc import Sequence
