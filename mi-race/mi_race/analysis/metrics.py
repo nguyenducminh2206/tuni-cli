@@ -1,5 +1,5 @@
 """
-Information-theoretic metrics computed from a confusion matrix.
+Information metrics computed from a confusion matrix.
 
 All entropies are in bits (log base 2).
 """
