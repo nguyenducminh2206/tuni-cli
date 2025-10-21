@@ -15,6 +15,12 @@ from sklearn.metrics import confusion_matrix, accuracy_score, classification_rep
 from ..data.extract_data import build_df
 from ..analysis import info_from_confusion_matrix
 
+# Optional CNN support (PyTorch)
+import torch
+from torch import nn
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+import re
+
 
 
 def _load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
@@ -244,14 +250,14 @@ def run_cmd(args):
     new_feature_frames = []
     keep_cols = []
     
-    # Check if any x_cols are time trace ranges (like "time_trace_1:time_trace_50")
-    time_trace_ranges = []
+    # Check if any x_cols are sequence ranges in the form "<seqcol>_<start>:<seqcol>_<end>"
+    range_specs = []
     regular_cols = []
     
     for c in x_cols:
-        if ":" in c and c.startswith("time_trace_"):
-            # This is a time trace range specification
-            time_trace_ranges.append(c)
+        if ":" in c:
+            # This is a sequence range specification
+            range_specs.append(c)
         else:
             regular_cols.append(c)
     
@@ -262,40 +268,42 @@ def run_cmd(args):
     if y_col in regular_cols:
         raise SystemExit(f"[mi-race] y_col '{y_col}' cannot be among x_cols.")
     
-    # Process time trace ranges first
-    if time_trace_ranges:
-        if "time_trace" not in df.columns:
-            raise SystemExit("[mi-race] time_trace column not found in dataset, but time trace ranges were specified.")
-        
-        time_trace_series = df["time_trace"]
-        for range_spec in time_trace_ranges:
-            try:
-                # Parse range like "time_trace_1:time_trace_50"
-                parts = range_spec.split(":")
-                if len(parts) != 2:
-                    raise ValueError("Invalid range format")
-                
-                start_part = parts[0].split("_")[-1]  # Extract "1" from "time_trace_1"
-                end_part = parts[1].split("_")[-1]    # Extract "50" from "time_trace_50"
-                
-                start_idx = int(start_part)
-                end_idx = int(end_part)
-                
-                if start_idx > end_idx:
-                    raise ValueError("Start index must be <= end index")
-                
-                # Extract the specified range from time_trace
-                range_df = _extract_sequence_range(time_trace_series, "time_trace", start_idx, end_idx)
-                if not range_df.empty:
-                    new_feature_frames.append(range_df)
-                    print(f"[mi-race] Extracted time trace range {range_spec}: {len(range_df.columns)} columns ({range_df.columns[0]} to {range_df.columns[-1]})")
-                else:
-                    print(f"[mi-race] Time trace range {range_spec} was empty, skipping")
-                    
-            except (ValueError, IndexError) as e:
-                raise SystemExit(f"[mi-race] Invalid time trace range specification '{range_spec}': {e}")
+    # Process sequence ranges first
+    for range_spec in range_specs:
+        try:
+            # Parse range like "seqcol_1:seqcol_50" -> left and right must share same base prefix before final underscore
+            parts = range_spec.split(":")
+            if len(parts) != 2:
+                raise ValueError("Invalid range format")
+
+            def parse_part(token: str):
+                if "_" not in token:
+                    raise ValueError("Range token must be of the form '<col>_<index>'")
+                base, idx_str = token.rsplit("_", 1)
+                return base, int(idx_str)
+
+            base_l, start_idx = parse_part(parts[0])
+            base_r, end_idx   = parse_part(parts[1])
+            if base_l != base_r:
+                raise ValueError("Range endpoints must refer to the same sequence column")
+            col_name = base_l
+            if col_name not in df.columns:
+                raise ValueError(f"sequence column '{col_name}' not found in dataset")
+            if start_idx > end_idx:
+                raise ValueError("Start index must be <= end index")
+
+            series = df[col_name]
+            range_df = _extract_sequence_range(series, col_name, start_idx, end_idx)
+            if not range_df.empty:
+                new_feature_frames.append(range_df)
+                print(f"[mi-race] Extracted sequence range {range_spec}: {len(range_df.columns)} columns ({range_df.columns[0]} to {range_df.columns[-1]})")
+            else:
+                print(f"[mi-race] Sequence range {range_spec} was empty, skipping")
+
+        except (ValueError, IndexError) as e:
+            raise SystemExit(f"[mi-race] Invalid sequence range specification '{range_spec}': {e}")
     
-    # Process regular columns (including full time_trace if specified)
+    # Process regular columns (including any declared sequence columns if present)
     for c in regular_cols:
         if c not in df.columns:
             continue  # Will be caught later in validation
@@ -325,6 +333,20 @@ def run_cmd(args):
     if new_feature_frames:
         for fdf in new_feature_frames:
             feature_df = pd.concat([feature_df, fdf], axis=1)
+
+    # Additionally, split any sequence columns explicitly listed in config under data.sequence_cols
+    seq_declared = data_cfg.get("sequence_cols", [])
+    if isinstance(seq_declared, (list, tuple)):
+        for sc in seq_declared:
+            if sc in df.columns:
+                s = df[sc]
+                if s.dtype == object and s.head(5).apply(lambda v: isinstance(v, (list, tuple, np.ndarray))).all():
+                    split_df = _split_sequence_col(s, sc)
+                    if not split_df.empty:
+                        feature_df = pd.concat([feature_df, split_df], axis=1)
+                        print(f"[mi-race] (declared) sequence column '{sc}' split into {len(split_df.columns)} columns")
+                else:
+                    print(f"[mi-race][WARN] Declared sequence column '{sc}' is not a sequence-like object column; skipping split")
     
     pd.DataFrame(feature_df)
 
@@ -339,65 +361,262 @@ def run_cmd(args):
     feature_df.to_csv(feature_df_path, index=False)
     print(f"[mi-race] Saved processed features to: {feature_df_path}")
 
-    # Build arrays
-    X = feature_df.to_numpy()
+    # Build arrays for general stats and counts
     y = df[y_col].to_numpy()
-
     full_counts = pd.Series(y).value_counts().sort_index()
     print(f"[mi-race] Class distribution (full): {full_counts.to_dict()}")
 
-    # Train/test split
+    # Train settings
     train_cfg = cfg.get("train", {})
     test_size = float(train_cfg.get("test_size", 0.2))
     random_state = int(train_cfg.get("random_state", 42))
+    standardize = bool(train_cfg.get("standardize", True))
     stratify = y if train_cfg.get("stratify", True) else None
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=stratify
-    )
+    # Resolve model selection and its specific config (support nested model configs)
+    model_section = cfg.get("model", {})
+    mtype = model_section.get("type", "mlp").lower()
+    selected_cfg = model_section.get(mtype, model_section)
 
-    train_counts = pd.Series(y_train).value_counts().sort_index()
-    test_counts  = pd.Series(y_test).value_counts().sort_index()
-    print(f"[mi-race] Class distribution (train): {train_counts.to_dict()}")
-    print(f"[mi-race] Class distribution (test):  {test_counts.to_dict()}")
+    if mtype == "mlp":
+        # Classic sklearn MLP on tabular features
+        X = feature_df.to_numpy()
 
-    # Model
-    model_cfg = cfg.get("model", {})
-    mtype = model_cfg.get("type", "mlp").lower()
-    if mtype != "mlp":
-        raise SystemExit("[mi-race] Only 'mlp' currently supported.")
-
-    hidden_layers = tuple(model_cfg.get("hidden_layers", [128, 128]))
-    activation = model_cfg.get("activation", "relu")
-    alpha = float(model_cfg.get("alpha", 1e-4))
-    max_iter = int(train_cfg.get("max_iter", 200))
-    standardize = bool(train_cfg.get("standardize", True))
-
-    steps = []
-    if standardize:
-        steps.append(("scaler", StandardScaler()))
-    steps.append((
-        "clf",
-        MLPClassifier(
-            hidden_layer_sizes=hidden_layers,
-            activation=activation,
-            alpha=alpha,
-            max_iter=max_iter,
-            random_state=random_state
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=random_state, stratify=stratify
         )
-    ))
-    pipe = Pipeline(steps)
 
-    pipe.fit(X_train, y_train)
+        train_counts = pd.Series(y_train).value_counts().sort_index()
+        test_counts  = pd.Series(y_test).value_counts().sort_index()
+        print(f"[mi-race] Class distribution (train): {train_counts.to_dict()}")
+        print(f"[mi-race] Class distribution (test):  {test_counts.to_dict()}")
 
-    learned_classes = pipe.named_steps["clf"].classes_.tolist()
-    print(f"[mi-race] Model learned classes: {learned_classes}")
-    missing_classes = [c for c in full_counts.index if c not in learned_classes]
-    if missing_classes:
-        print(f"[mi-race][WARN] Classes missing from training set: {missing_classes} "
-              f"-> cannot be predicted. Consider reducing test_size or using stratified CV.")
+        hidden_layers = tuple(selected_cfg.get("hidden_layers", [128, 128]))
+        activation = selected_cfg.get("activation", "relu")
+        alpha = float(selected_cfg.get("alpha", 1e-4))
+        max_iter = int(train_cfg.get("max_iter", 200))
 
-    y_pred = pipe.predict(X_test)
+        steps = []
+        if standardize:
+            steps.append(("scaler", StandardScaler()))
+        steps.append((
+            "clf",
+            MLPClassifier(
+                hidden_layer_sizes=hidden_layers,
+                activation=activation,
+                alpha=alpha,
+                max_iter=max_iter,
+                random_state=random_state
+            )
+        ))
+        pipe = Pipeline(steps)
+
+        pipe.fit(X_train, y_train)
+
+        learned_classes = pipe.named_steps["clf"].classes_.tolist()
+        print(f"[mi-race] Model learned classes: {learned_classes}")
+        missing_classes = [c for c in full_counts.index if c not in learned_classes]
+        if missing_classes:
+            print(f"[mi-race][WARN] Classes missing from training set: {missing_classes} "
+                  f"-> cannot be predicted. Consider reducing test_size or using stratified CV.")
+
+        y_pred = pipe.predict(X_test)
+
+    elif mtype == "cnn":
+        # 1D CNN on split sequence columns generated by _split_sequence_col
+        # Detect groups of columns named like '<prefix>_<idx>' and pick the desired prefix
+        pat = re.compile(r"^(?P<prefix>.+)_(?P<idx>\d+)$")
+        groups: dict[str, list[tuple[int, str]]] = {}
+        for c in feature_df.columns:
+            m = pat.match(c)
+            if not m:
+                continue
+            pref = m.group("prefix")
+            idx = int(m.group("idx"))
+            groups.setdefault(pref, []).append((idx, c))
+
+        if not groups:
+            raise SystemExit(
+                "[mi-race] CNN requires split sequence columns. Set data.sequence_mode='split' "
+                "and include at least one sequence column (e.g., 'time_trace') in data.x_cols."
+            )
+
+        # Choose which split sequence to use
+        seq_prefix = selected_cfg.get("sequence_prefix")
+        chosen_prefix = None
+        if seq_prefix is not None:
+            if seq_prefix not in groups:
+                raise SystemExit(
+                    f"[mi-race] sequence_prefix='{seq_prefix}' not found. Available split groups: {sorted(groups.keys())}"
+                )
+            chosen_prefix = seq_prefix
+        else:
+            if len(groups) == 1:
+                chosen_prefix = next(iter(groups))
+            else:
+                raise SystemExit(
+                    f"[mi-race] Multiple split sequence groups found {sorted(groups.keys())}. "
+                    f"Specify model.cnn.sequence_prefix to choose one."
+                )
+
+        seq_cols_sorted = [name for idx, name in sorted(groups[chosen_prefix], key=lambda t: t[0])]
+        print(f"[mi-race][cnn] Using split sequence group '{chosen_prefix}' with {len(seq_cols_sorted)} steps")
+        X_seq = feature_df[seq_cols_sorted].to_numpy(dtype=float)
+
+        if standardize:
+            scaler = StandardScaler()
+            X_seq = scaler.fit_transform(X_seq)
+
+        # Split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X_seq, y, test_size=test_size, random_state=random_state, stratify=stratify
+        )
+
+        train_counts = pd.Series(y_train).value_counts().sort_index()
+        test_counts  = pd.Series(y_test).value_counts().sort_index()
+        print(f"[mi-race] Class distribution (train): {train_counts.to_dict()}")
+        print(f"[mi-race] Class distribution (test):  {test_counts.to_dict()}")
+
+        # Label mapping to integers
+        classes_sorted = sorted(pd.Series(y).dropna().unique().tolist())
+        num_classes = len(classes_sorted)
+        label_to_idx = {lbl: i for i, lbl in enumerate(classes_sorted)}
+        idx_to_label = {i: lbl for lbl, i in label_to_idx.items()}
+
+        y_train_idx = np.array([label_to_idx[v] for v in y_train], dtype=np.int64)
+        y_test_idx  = np.array([label_to_idx[v] for v in y_test], dtype=np.int64)
+
+        # Torch dataset
+        class SeqDataset(Dataset):
+            def __init__(self, X2d: np.ndarray, y1d: np.ndarray):
+                self.X = X2d.astype(np.float32)
+                self.y = y1d.astype(np.int64)
+            def __len__(self):
+                return self.X.shape[0]
+            def __getitem__(self, idx: int):
+                # shape (1, L)
+                x = torch.from_numpy(self.X[idx][None, :])
+                y = torch.tensor(self.y[idx], dtype=torch.long)
+                return x, y
+
+        batch_size = int(selected_cfg.get("batch_size", 64))
+        # Optional weighted sampler to handle imbalance
+        sampler_mode = str(selected_cfg.get("sampler", "none")).lower()
+        if sampler_mode == "weighted":
+            class_counts = np.bincount(y_train_idx, minlength=num_classes).astype(float)
+            class_counts[class_counts == 0.0] = 1.0
+            sample_weights = 1.0 / class_counts[y_train_idx]
+            sampler = WeightedRandomSampler(weights=torch.tensor(sample_weights, dtype=torch.float32),
+                                            num_samples=len(sample_weights),
+                                            replacement=True)
+            print("[mi-race][cnn] Using WeightedRandomSampler for class balancing")
+            train_loader = DataLoader(SeqDataset(X_train, y_train_idx), batch_size=batch_size, sampler=sampler)
+        else:
+            train_loader = DataLoader(SeqDataset(X_train, y_train_idx), batch_size=batch_size, shuffle=True)
+        test_loader  = DataLoader(SeqDataset(X_test,  y_test_idx),  batch_size=batch_size, shuffle=False)
+
+        # Model definition
+        in_channels = 1
+        channels = list(selected_cfg.get("channels", [16, 32]))
+        kernel_size = int(selected_cfg.get("kernel_size", 5))
+        pool_size = int(selected_cfg.get("pool", 2))
+        fc_hidden = int(selected_cfg.get("fc", 128))
+
+        class CNN1D(nn.Module):
+            def __init__(self, L: int):
+                super().__init__()
+                pad = kernel_size // 2
+                self.conv1 = nn.Conv1d(in_channels, channels[0], kernel_size, padding=pad)
+                self.relu1 = nn.ReLU()
+                self.pool1 = nn.MaxPool1d(pool_size)
+                self.conv2 = nn.Conv1d(channels[0], channels[1], kernel_size, padding=pad)
+                self.relu2 = nn.ReLU()
+                self.pool2 = nn.MaxPool1d(pool_size)
+                # Determine flattened size dynamically
+                with torch.no_grad():
+                    dummy = torch.zeros(1, 1, L)
+                    h = self._forward_features(dummy)
+                    flat = h.view(1, -1).shape[1]
+                self.fc1 = nn.Linear(flat, fc_hidden)
+                self.relu_fc = nn.ReLU()
+                self.out = nn.Linear(fc_hidden, num_classes)
+
+            def _forward_features(self, x):
+                x = self.pool1(self.relu1(self.conv1(x)))
+                x = self.pool2(self.relu2(self.conv2(x)))
+                return x
+
+            def forward(self, x):
+                x = self._forward_features(x)
+                x = torch.flatten(x, 1)
+                x = self.relu_fc(self.fc1(x))
+                return self.out(x)
+
+        L = X_seq.shape[1]
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model = CNN1D(L).to(device)
+        epochs = int(selected_cfg.get("epochs", 5))
+        lr = float(selected_cfg.get("lr", 1e-3))
+        optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+        # Optional class weights for imbalance handling
+        criterion: nn.Module
+        cw_mode = str(selected_cfg.get("class_weight", "none")).lower()
+        if cw_mode == "balanced":
+            counts = np.bincount(y_train_idx, minlength=num_classes).astype(float)
+            # Avoid division by zero (shouldn't happen with stratify=True)
+            counts[counts == 0.0] = 1.0
+            inv_freq = 1.0 / counts
+            weights = inv_freq * (num_classes / inv_freq.sum())  # normalize-ish
+            weight_tensor = torch.tensor(weights, dtype=torch.float32, device=device)
+            print(f"[mi-race][cnn] Using class weights (balanced): {weights.tolist()}")
+            criterion = nn.CrossEntropyLoss(weight=weight_tensor)
+        else:
+            criterion = nn.CrossEntropyLoss()
+
+        # Train with tqdm progress
+        try:
+            from tqdm.auto import tqdm  # lazy import to keep MLP path lightweight
+        except Exception:  # pragma: no cover
+            tqdm = None
+
+        model.train()
+        for ep in range(1, epochs + 1):
+            total_loss = 0.0
+            total = 0
+            correct = 0
+            iterator = train_loader
+            if tqdm is not None:
+                iterator = tqdm(train_loader, desc=f"[cnn] epoch {ep}/{epochs}", leave=False)
+            for xb, yb in iterator:
+                xb = xb.to(device)
+                yb = yb.to(device)
+                optimizer.zero_grad()
+                logits = model(xb)
+                loss = criterion(logits, yb)
+                loss.backward()
+                optimizer.step()
+                bs = yb.size(0)
+                total_loss += loss.item() * bs
+                total += bs
+                preds = torch.argmax(logits, dim=1)
+                correct += (preds == yb).sum().item()
+            avg_loss = total_loss / max(total, 1)
+            train_acc = correct / max(total, 1)
+            print(f"[mi-race][cnn] epoch {ep}/{epochs}  loss={avg_loss:.4f}  acc={train_acc:.4f}")
+
+        # Predict on test
+        model.eval()
+        y_pred_idx = []
+        with torch.no_grad():
+            for xb, _ in test_loader:
+                xb = xb.to(device)
+                logits = model(xb)
+                preds = torch.argmax(logits, dim=1)
+                y_pred_idx.extend(preds.cpu().numpy().tolist())
+        y_pred = np.array([idx_to_label[i] for i in y_pred_idx])
+
+    else:
+        raise SystemExit("[mi-race] Unknown model type. Supported: 'mlp', 'cnn'.")
     acc = accuracy_score(y_test, y_pred)
 
     n_classes = sorted(pd.Series(y).dropna().unique().tolist())
@@ -416,7 +635,15 @@ def run_cmd(args):
         json.dump(info, f, indent=2)
 
     from sklearn.metrics import f1_score
-    macro_f1 = f1_score(y_test, y_pred, average='macro')
+    # Identify labels with zero predicted samples for clearer messaging
+    preds_unique = sorted(pd.Series(y_pred).dropna().unique().tolist())
+    missing_predicted = [c for c in n_classes if c not in preds_unique]
+    if missing_predicted:
+        print(f"[mi-race][WARN] No predicted samples for classes: {missing_predicted}. "
+              f"Metrics for these labels will use zero_division=0.")
+
+    # Use zero_division=0 to avoid sklearn UndefinedMetricWarning
+    macro_f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
 
     preview = _preview_block(df)
     print(preview)
@@ -438,7 +665,7 @@ def run_cmd(args):
     # Classification report
     if cfg.get("output", {}).get("show_report", True):
         print("\n=== Classification Report (test) ===")
-        print(classification_report(y_test, y_pred, digits=4))
+        print(classification_report(y_test, y_pred, labels=n_classes, digits=4, zero_division=0))
 
     print(f"\nSaved: {cm_path}")
     print(f"Saved: {mi_path}")
