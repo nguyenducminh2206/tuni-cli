@@ -41,7 +41,7 @@ def build_report_text(model_name: str,
     parts.append(f"Macro F1: {macro_f1*100:.2f}%\n")
     parts.append("\n=== Confusion Matrix (test) ===\n")
     parts.append(cm_table(cm, n_classes) + "\n")
-    parts.append("\n=== Information (from confusion matrix) ===\n")
+    parts.append("\n=== Mutual Information (from confusion matrix) ===\n")
     parts.append(
         (
             f"H(true): {info['H_true']:.4f} bits  |  H(pred): {info['H_pred']:.4f} bits  |  Hjoint: {info['H_joint']:.4f} bits\n"
