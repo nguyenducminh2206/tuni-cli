@@ -1,7 +1,7 @@
 import argparse
 from importlib.metadata import version, PackageNotFoundError
 from mi_race.data.preview import preview_csv
-from mi_race.train.runner import run_cmd
+from mi_race.train.orchestrator import run_cmd
 
 
 def _pkg_version() -> str:
@@ -35,7 +35,7 @@ def main() -> None:
 
     # mi-race run <model> [-c mi-race.json]
     p_run = sub.add_parser("run", help="train/evaluate a model from json config")
-    p_run.add_argument("--model", choices=["mlp", "cnn"], help="model selection")
+    p_run.add_argument("--model", choices=["mlp", "cnn", "all"], help="model selection (or 'all' to run each configured model)")
     p_run.add_argument("-c", "--config", default="config.json", help="config json path")
     p_run.set_defaults(func=run_cmd)
 
