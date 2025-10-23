@@ -27,15 +27,13 @@ def main() -> None:
 
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    # mi-race load <path/to/file.csv> [--label y]
-    p_load = sub.add_parser("load", help="preview a CSV file (no changes made)")
-    p_load.add_argument("path", help="path to CSV file")
-    p_load.add_argument("--label", help="label column name to count classes", default=None)
-    p_load.set_defaults(func=_load_cmd)
-
     # mi-race run <model> [-c mi-race.json]
     p_run = sub.add_parser("run", help="train/evaluate a model from json config")
-    p_run.add_argument("--model", choices=["mlp", "cnn", "all"], help="model selection (or 'all' to run each configured model)")
+    p_run.add_argument(
+        "--model",
+        choices=["mlp", "cnn"],
+        help="model selection ('mlp' or 'cnn'). Run the command once per model.",
+    )
     p_run.add_argument("-c", "--config", default="config.json", help="config json path")
     p_run.set_defaults(func=run_cmd)
 
