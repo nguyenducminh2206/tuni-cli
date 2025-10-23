@@ -112,15 +112,6 @@ def summarize_cell(x, n_head=3, n_tail=3):
     return str(x)
 
 
-def preview_block(df: pd.DataFrame, colwidth: int = 80) -> str:
-    fmt = {c: (lambda v, f=summarize_cell: f(v)) for c in df.columns}
-    with pd.option_context(
-        "display.large_repr", "truncate",
-        "display.max_colwidth", colwidth,
-    ):
-        return " \n=== Preview (first rows) ===\n" + df.head().to_string(index=False, formatters=fmt) + "\n"
-
-
 def build_features_from_config(df: pd.DataFrame, cfg: dict) -> Tuple[pd.DataFrame, list[str]]:
     """Create the feature dataframe according to `data` config.
     Returns: (feature_df, resolved_feature_columns)
