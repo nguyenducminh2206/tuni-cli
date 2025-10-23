@@ -3,7 +3,6 @@ import h5py
 import numpy as np
 import os
 import re
-from pathlib import Path
 
 
 def read_file(folder_path):
@@ -71,82 +70,3 @@ def extract_noise(filename):
     match = re.search(r'noise[_\-]?([0-9.]+)', filename)
     return float(match.group(1) if match else None)
 
-
-def main():
-    # Example: expand and export time_trace into 1000 columns CSV under processed_data
-    out_path = export_time_trace_to_csv("data_7x7", n_cols=1000)
-    print(f"[mi-race] Wrote: {out_path}")
-
-def _safe_array(x) -> np.ndarray:
-    if isinstance(x, (list, tuple, np.ndarray)):
-        return np.asarray(x, dtype=float)
-    return np.array([], dtype=float)
-
-
-def expand_time_trace_columns(series: pd.Series, prefix: str = "time_trace", n_cols: int = 1000) -> pd.DataFrame:
-    """
-    Expand a column of sequences (list/array) into fixed number of columns.
-    - Outputs columns: prefix_1, ..., prefix_{n_cols}
-    - If a sequence is shorter than n_cols -> pad with NaN
-    - If longer -> truncate
-    """
-    arrays = series.apply(_safe_array)
-    n_rows = len(arrays)
-    out = np.full((n_rows, n_cols), np.nan, dtype=float)
-    for i, arr in enumerate(arrays):
-        m = min(arr.size, n_cols)
-        if m:
-            out[i, :m] = arr[:m]
-    cols = [f"{prefix}_{i}" for i in range(1, n_cols + 1)]
-    return pd.DataFrame(out, columns=cols, index=series.index)
-
-
-def export_time_trace_to_csv(
-    data_path: str | os.PathLike,
-    out_dir: str | os.PathLike = "processed_data",
-    filename: str | None = None,
-    n_cols: int = 1000,
-) -> str:
-    """
-    Build a dataframe from HDF5 dataset id or directory, expand `time_trace` into
-    `n_cols` columns (time_trace_1..time_trace_{n_cols}), and save CSV under processed_data.
-
-    Returns absolute path to the written CSV file.
-    """
-    # Resolve project root (mi-race/)
-    project_root = Path(__file__).resolve().parents[2]
-
-    # Resolve input location relative to project root if not absolute
-    data_path = Path(data_path)
-    if not data_path.is_absolute():
-        candidate = project_root / data_path
-        data_path = candidate if candidate.exists() else data_path
-
-    # Build dataframe from HDF5 directory or dataset id string
-    df = build_df(str(data_path))
-
-    if "time_trace" not in df.columns:
-        raise SystemExit("[mi-race] 'time_trace' column not found in built dataframe.")
-
-    tt_df = expand_time_trace_columns(df["time_trace"], prefix="time_trace", n_cols=n_cols)
-
-    # Combine with non-time_trace columns
-    base_df = df.drop(columns=["time_trace"]).reset_index(drop=True)
-    out_df = pd.concat([base_df, tt_df.reset_index(drop=True)], axis=1)
-
-    # Prepare output path
-    out_dir = Path(out_dir)
-    if not out_dir.is_absolute():
-        out_dir = project_root / out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    if not filename:
-        filename = "sample_df.csv"
-    out_csv = out_dir / filename
-
-    out_df.to_csv(out_csv, index=False)
-    return str(out_csv.resolve())
-
-
-if __name__ == "__main__":
-    main()
