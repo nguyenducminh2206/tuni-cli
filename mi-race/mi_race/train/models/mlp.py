@@ -27,6 +27,7 @@ def run_mlp(feature_df: pd.DataFrame,
 
     train_counts = pd.Series(y_train).value_counts().sort_index()
     test_counts  = pd.Series(y_test).value_counts().sort_index()
+    print(f"[mi-race][mlp] Total rows: {feature_df.shape[0]}")
     print(f"[mi-race][mlp] Class distribution (train): {train_counts.to_dict()}")
     print(f"[mi-race][mlp] Class distribution (test):  {test_counts.to_dict()}")
 
