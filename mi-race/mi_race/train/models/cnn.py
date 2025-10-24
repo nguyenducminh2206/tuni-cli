@@ -144,6 +144,8 @@ def run_cnn(feature_df: pd.DataFrame,
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = CNN1D(L).to(device)
     epochs = int(model_cfg.get("epochs", 5))
+    # Hardcoded cadence: show tqdm/progress + epoch logs every 5 epochs
+    log_every_epochs = 5
     lr = float(model_cfg.get("lr", 1e-3))
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -171,7 +173,9 @@ def run_cnn(feature_df: pd.DataFrame,
         total = 0
         correct = 0
         iterator = train_loader
-        if tqdm is not None:
+        # Only show tqdm progress on selected epochs to reduce noise
+        show_bar = (tqdm is not None) and (ep % log_every_epochs == 0)
+        if show_bar:
             iterator = tqdm(train_loader, desc=f"[cnn] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:
             xb = xb.to(device)
@@ -188,15 +192,53 @@ def run_cnn(feature_df: pd.DataFrame,
             correct += (preds == yb).sum().item()
         avg_loss = total_loss / max(total, 1)
         train_acc = correct / max(total, 1)
-        print(f"[mi-race][cnn] epoch {ep}/{epochs}  loss={avg_loss:.4f}  acc={train_acc:.4f}")
+        # Print epoch summary strictly every N epochs
+        if ep % log_every_epochs == 0:
+            # Evaluate on test set (loss & accuracy)
+            model.eval()
+            with torch.no_grad():
+                t_total = 0
+                t_correct = 0
+                t_loss_sum = 0.0
+                for xbt, ybt in test_loader:
+                    xbt = xbt.to(device)
+                    ybt = ybt.to(device)
+                    logits_t = model(xbt)
+                    loss_t = criterion(logits_t, ybt)
+                    bs_t = ybt.size(0)
+                    t_loss_sum += loss_t.item() * bs_t
+                    t_total += bs_t
+                    preds_t = torch.argmax(logits_t, dim=1)
+                    t_correct += (preds_t == ybt).sum().item()
+                test_loss = t_loss_sum / max(t_total, 1)
+                test_acc = t_correct / max(t_total, 1)
+            model.train()
+            print(
+                f"[mi-race][cnn] epoch {ep}/{epochs}  "
+                f"train_loss={avg_loss:.4f} train_acc={train_acc:.4f}  "
+                f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}"
+            )
 
     model.eval()
     y_pred_idx = []
+    final_total = 0
+    final_correct = 0
+    final_loss_sum = 0.0
     with torch.no_grad():
-        for xb, _ in test_loader:
+        for xb, yb in test_loader:
             xb = xb.to(device)
+            yb = yb.to(device)
             logits = model(xb)
+            loss = criterion(logits, yb)
+            bs = yb.size(0)
+            final_loss_sum += loss.item() * bs
+            final_total += bs
             preds = torch.argmax(logits, dim=1)
+            final_correct += (preds == yb).sum().item()
             y_pred_idx.extend(preds.cpu().numpy().tolist())
+    if final_total > 0:
+        final_test_loss = final_loss_sum / final_total
+        final_test_acc = final_correct / final_total
+        print(f"[mi-race][cnn] final test: loss={final_test_loss:.4f} acc={final_test_acc:.4f}")
     y_pred = np.array([idx_to_label[i] for i in y_pred_idx])
     return y_test, y_pred
