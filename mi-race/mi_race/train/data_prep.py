@@ -16,6 +16,8 @@ def ensure_outdir(path: Path) -> None:
 
 def load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
     """
+    Load dataframe according to config.
+
     Rules:
       - If data.path given:
           * If path exists and is a file: load by extension
@@ -23,9 +25,22 @@ def load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
           * If path does not exist: treat raw string as dataset id -> build_df(path)
       - Else if data.id given: build_df(id)
       - Else: error
+
+    Additionally, when data.balance is enabled, we load more samples per HDF5 file (10
+    instead of 1) to avoid ending up with too small a dataset after balancing.
     """
     path = data_cfg.get("path")
     ds_id = data_cfg.get("id")
+
+    balance_cfg = data_cfg.get("balance", False)
+    if isinstance(balance_cfg, bool):
+        balance_enabled = balance_cfg
+    elif isinstance(balance_cfg, dict):
+        balance_enabled = balance_cfg.get("enabled", True)
+    else:
+        balance_enabled = False
+    n_samples_per_file = 10 if balance_enabled else 1
+
     if path:
         p = Path(path)
         if p.exists():
@@ -39,11 +54,11 @@ def load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
                     return pd.read_parquet(p)
                 raise SystemExit(f"[mi-race] Unsupported file extension: {suf}")
             # Directory OR something like 'data_7x7' (no extension) -> dataset id
-            return build_df(p.name)
+            return build_df(p.name, n_samples_per_file=n_samples_per_file)
         # Not existing path: treat string as dataset id
-        return build_df(path)
+        return build_df(path, n_samples_per_file=n_samples_per_file)
     if ds_id:
-        return build_df(ds_id)
+        return build_df(ds_id, n_samples_per_file=n_samples_per_file)
     raise SystemExit("[mi-race] Provide data.path or data.id in config.")
 
 

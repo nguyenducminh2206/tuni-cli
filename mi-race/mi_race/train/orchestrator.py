@@ -117,7 +117,33 @@ def run_cmd(args):
     if y_col not in df.columns:
         raise SystemExit(f"[mi-race] y_col '{y_col}' not found. Available: {df.columns.tolist()}")
 
-    # Build features
+    # Optional: balance by min count of label if enabled in config
+    train_cfg = cfg.get("train", {})
+    random_state = int(train_cfg.get("random_state", 42))
+    balance_cfg = data_cfg.get("balance", False)
+    enabled_balance = False
+    if isinstance(balance_cfg, bool):
+        enabled_balance = balance_cfg
+    elif isinstance(balance_cfg, dict):
+        enabled_balance = balance_cfg.get("enabled", True)
+    if enabled_balance:
+        before_counts = pd.Series(df[y_col]).value_counts().sort_index()
+        min_count = int(before_counts.min()) if not before_counts.empty else 0
+        if min_count > 0:
+            df = (
+                df.dropna(subset=[y_col])
+                  .groupby(y_col, group_keys=False)
+                  .sample(n=min_count, random_state=random_state)
+                  .reset_index(drop=True)
+            )
+            after_counts = pd.Series(df[y_col]).value_counts().sort_index()
+            print(f"[mi-race] Balancing enabled: undersampled each class to min_count={min_count}")
+            print(f"[mi-race] Class distribution (before): {before_counts.to_dict()}")
+            print(f"[mi-race] Class distribution (after):  {after_counts.to_dict()}")
+        else:
+            print("[mi-race] Balancing requested but no valid label counts; proceeding without balancing.")
+
+    # Build features on the (optionally balanced) dataframe
     feature_df, resolved_feature_cols = build_features_from_config(df, cfg)
     summary_cols_text = _summarize_feature_columns(resolved_feature_cols)
     print(f"[mi-race] Final feature columns (n={len(resolved_feature_cols)}):\n{summary_cols_text}")
@@ -131,7 +157,7 @@ def run_cmd(args):
     print(f"[mi-race] Saved processed features to: {feature_df_path}")
     
 
-    # Build arrays for general stats and counts
+    # Build arrays for general stats and counts (from the data actually used for training)
     y = df[y_col].to_numpy()
     full_counts = pd.Series(y).value_counts().sort_index()
     print(f"[mi-race] Class distribution (full): {full_counts.to_dict()}")
