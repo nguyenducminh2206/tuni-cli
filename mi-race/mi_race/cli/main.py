@@ -1,6 +1,5 @@
 import argparse
 from importlib.metadata import version, PackageNotFoundError
-from mi_race.data.preview import preview_csv
 from mi_race.train.orchestrator import run_cmd
 
 
@@ -11,10 +10,6 @@ def _pkg_version() -> str:
         except PackageNotFoundError:
             continue
     return "0.0.0"
-
-
-def _load_cmd(args):
-    preview_csv(args.path, label=args.label)  
 
 
 def main() -> None:
