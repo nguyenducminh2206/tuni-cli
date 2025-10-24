@@ -55,6 +55,7 @@ MODEL_COLORS: Dict[str, str] = {
     "mlp": "\x1b[38;5;114m",   # light green
     "cnn": "\x1b[38;5;177m",   # light magenta
     "rnn": "\x1b[38;5;81m",    # light cyan
+    "rf": "\x1b[38;5;220m",     # yellow
 }
 
 

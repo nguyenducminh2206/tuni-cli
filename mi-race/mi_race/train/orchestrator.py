@@ -265,14 +265,14 @@ def run_cmd(args):
 
     model_section = cfg.get("model", {})
     selection = getattr(args, "model", None)
-    if selection not in (None, "mlp", "cnn", "rnn"):
-        raise SystemExit("[mi-race] Unsupported --model value. Use 'mlp', 'cnn', or 'rnn'.")
-    if selection in ("mlp", "cnn", "rnn"):
+    if selection not in (None, "mlp", "cnn", "rnn", "rf"):
+        raise SystemExit("[mi-race] Unsupported --model value. Use 'mlp', 'cnn', 'rnn', or 'rf'.")
+    if selection in ("mlp", "cnn", "rnn", "rf"):
         mtype = selection
         selected_cfg = model_section.get(mtype, model_section.get(mtype, {})) if isinstance(model_section, dict) else {}
     else:
         # default by config
-        if isinstance(model_section, dict) and any(k in ("mlp", "cnn", "rnn") for k in model_section.keys()):
+        if isinstance(model_section, dict) and any(k in ("mlp", "cnn", "rnn", "rf") for k in model_section.keys()):
             if "mlp" in model_section:
                 mtype = "mlp"
                 selected_cfg = model_section["mlp"]
@@ -282,6 +282,9 @@ def run_cmd(args):
             elif "rnn" in model_section:
                 mtype = "rnn"
                 selected_cfg = model_section["rnn"]
+            elif "rf" in model_section:
+                mtype = "rf"
+                selected_cfg = model_section["rf"]
             else:
                 mtype = "mlp"
                 selected_cfg = {}
@@ -290,7 +293,7 @@ def run_cmd(args):
             selected_cfg = model_section if isinstance(model_section, dict) else {}
 
     # For non-RNN models, build features (which may include split groups) and save
-    if mtype in ("mlp", "cnn"):
+    if mtype in ("mlp", "cnn", "rf"):
         feature_df, resolved_feature_cols = build_features_from_config(df, cfg)
         summary_cols_text = _summarize_feature_columns(resolved_feature_cols)
         print(f"[mi-race] Final feature columns (n={len(resolved_feature_cols)}):\n{summary_cols_text}")
@@ -412,6 +415,52 @@ def run_cmd(args):
                     )
                 )
                 _update_noise_accuracy_summary(base_out, "cnn", float(noise_level), float(acc_sub))
+    elif mtype == "rf":
+        from .models.random_forest import run_random_forest
+        y_test, y_pred = run_random_forest(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
+
+        # Per-noise loop for RF
+        if "noise" in df.columns:
+            try:
+                noise_levels = sorted(pd.Series(df["noise"]).dropna().unique().tolist())
+            except Exception:
+                noise_levels = []
+            for noise_level in noise_levels:
+                print(f"\n=== Training for noise {noise_level} (rf) ===")
+                mask = df["noise"] == noise_level
+                feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
+                y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
+                if feature_df_sub.empty or len(y_sub) == 0:
+                    print(f"[mi-race][rf] Skipping noise {noise_level}: no rows after filtering")
+                    continue
+                sub_stratify = y_sub if train_cfg.get("stratify", True) else None
+                y_t_sub, y_p_sub = run_random_forest(
+                    feature_df_sub,
+                    y_sub,
+                    train_cfg,
+                    selected_cfg,
+                    standardize,
+                    random_state,
+                    sub_stratify,
+                )
+                acc_sub = accuracy_score(y_t_sub, y_p_sub)
+                labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
+                cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
+                info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
+                print(
+                    f"[mi-race][rf] noise={noise_level}  accuracy={acc_sub:.4f}"
+                )
+                print("Confusion Matrix (noise={}):".format(noise_level))
+                print(pd.DataFrame(cm_sub, index=[f"true_{l}" for l in labels_sub], columns=[f"pred_{l}" for l in labels_sub]))
+                print(
+                    "MI: I(true;pred)={:.4f}  NMI_sqrt={:.4f}  NMI_min={:.4f}  NMI_max={:.4f}".format(
+                        info_sub.get("I", float("nan")),
+                        info_sub.get("NMI_sqrt", float("nan")),
+                        info_sub.get("NMI_min", float("nan")),
+                        info_sub.get("NMI_max", float("nan")),
+                    )
+                )
+                _update_noise_accuracy_summary(base_out, "rf", float(noise_level), float(acc_sub))
     elif mtype == "rnn":
         # Use original df to keep raw sequences for RNN
         from .models.rnn import run_rnn
