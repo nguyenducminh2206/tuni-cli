@@ -2,9 +2,12 @@
 
 A lightweight command‑line tool to train and evaluate ML models directly from the terminal on tabular and sequence‑like data. It supports:
 - Fast CSV/TSV/Parquet loading
-- Config‑driven training (currently MLP; CNN placeholder in config)
-- Sequence columns (e.g. `time_trace`) → statistical feature expansion
-- Clean terminal report: preview, class counts, accuracy, macro‑F1, confusion matrix
+- Balancing dataset by undersampling to minimum label count
+- Config‑driven training for MLP and 1D CNN
+- Sequence columns (e.g. `time_trace`) → statistical expansion or split into steps
+- Clean terminal report: class counts, accuracy, macro‑F1, confusion matrix
+- Noise analysis (when a noise column exists): train per‑noise and print reports
+- Compare overall accuracy and accuracy‑vs‑noise across models (terminal charts)
 - Artifacts saved to `outputs/`
 
 ---
@@ -16,7 +19,7 @@ A lightweight command‑line tool to train and evaluate ML models directly from 
 python -m venv .venv              # create virtual environment
 .\.venv\Scripts\activate          # activate it
 python -m pip install -U pip      # upgrade pip (optional but good practice)
-pip install -r requirements.txt
+cd mi-race                        # move to the working directory
 pip install -e .                  # editable install to use `mi-race` CLI
 ```
 
@@ -25,7 +28,7 @@ pip install -e .                  # editable install to use `mi-race` CLI
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -U pip
-pip install -r requirements.txt
+cd mi-race
 pip install -e .
 ```
 
@@ -45,13 +48,22 @@ Why venv?
 
 ```bash
 mi-race run --model mlp -c config.json
+mi-race run --model cnn -c config.json
+
+# Compare models from outputs/summary_models.csv (prints terminal bars)
+mi-race compare
+
 # or (module form)
 python -m mi_race.cli.main run --model mlp -c config.json
 ```
 
-Preview a file:
-```bash
-mi-race load processed_data/iris_ds.csv --label species
+### `compare`
+Read `outputs/summary_models.csv` and print two terminal plots:
+- Overall model accuracy (one horizontal bar per model)
+- Accuracy vs noise (grouped horizontal bars per noise level)
+
+```
+mi-race compare
 ```
 
 ---
@@ -64,24 +76,41 @@ mi-race load processed_data/iris_ds.csv --label species
     "path": "data_7x7",       // path/to_your/dataset
     "y_col": "dis_to_target", // labels for the model
     "x_cols": ["time_trace_0:time_trace_99", "cMax", "cVar"], // inputs for the model
-    "sequence_mode": "split" // 3 modes: "split" | "stats" | "ignore"
+    "sequence_mode": "split", // 3 modes: "split" | "stats" | "ignore"
+    "balance": true // "false" if balancing data is not necessary 
   },
   "model": {
-    "type": "mlp",
-    "hidden_layers": [128, 128],
-    "activation": "relu",
-    "alpha": 0.0001
-  },
-  "train": {
-    "test_size": 0.2,
-    "random_state": 42,
-    "max_iter": 200,
-    "standardize": true
-  },
-  "output": {
-    "dir": "outputs",
-    "show_report": true
-  }
+        "mlp": {
+            "type": "mlp",
+            "hidden_layers": [128, 128],
+            "activation": "relu",
+            "solver": "adam",
+            "learning_rate_init": 0.001,
+            "alpha": 0.0001,
+            "batch_size": "auto"
+        },
+        "cnn": {
+            "type": "cnn",
+            "channels": [16, 32],
+            "kernel_size": 5,
+            "pool": 2,
+            "fc": 128,
+            "epochs": 15,
+            "lr": 0.001,
+            "batch_size": 64
+        }
+    },
+    "train": {
+        "test_size": 0.2,
+        "random_state": 42,
+        "max_iter": 500,
+        "standardize": true
+    },
+    "output": {
+        "dir": "outputs",
+        "show_report": true
+    }
+
 }
 ```
 
@@ -92,7 +121,7 @@ mi-race load processed_data/iris_ds.csv --label species
   - If `path` does **not** exist: treated as **dataset id** → `build_df(path)`.
 - **`id`**: alternative to `path` (explicit dataset id). One of `path` or `id` is required.
 - **`y_col`**: label/target column (must exist).
-- **`x_cols`**/**`x_col`**: feature columns. If omitted, all **numeric** columns except `y_col` are used.
+- **`x_cols`**: feature columns. If omitted, all **numeric** columns except `y_col` are used.
   - Supports **column ranges** for split sequence columns: Use `"prefix_start:prefix_end"` notation to select a range of columns.
   - Example: `"time_trace_1:time_trace_50"` selects columns `time_trace_1` through `time_trace_50`.
   - Can mix ranges with regular column names: `["time_trace_10:time_trace_100", "cMax", "cVar"]`
@@ -106,11 +135,20 @@ mi-race load processed_data/iris_ds.csv --label species
 
 
 ### Model Section 
-- type: mlp
-- hidden_layers: list of layer sizes
-- activation: relu | tanh | logistic | identity
-- alpha: L2 regularization
-(You may add solver, learning_rate_init, batch_size, etc.)
+- MLP
+  - type: mlp
+  - hidden_layers: list of layer sizes
+  - activation: relu | tanh | logistic | identity
+  - alpha: L2 regularization
+  - Other: solver, learning_rate_init, batch_size, etc.
+
+#### CNN options
+- type: cnn
+- channels: list of conv channel sizes (e.g., [16, 32])
+- kernel_size, pool, fc, epochs, lr, batch_size
+- sequence_prefix: name prefix of the split sequence group (required if multiple groups exist). Example: with `time_trace_0..time_trace_99`, use `"sequence_prefix": "time_trace"`.
+- Logs: epoch summaries print exactly every 5 epochs with train/test loss and accuracy; a final test summary is printed at the end.
+- Requires: `data.sequence_mode: "split"` and that your `x_cols` include the split sequence range.
 
 ### Train Section
 - test_size: test split fraction
@@ -127,64 +165,94 @@ mi-race load processed_data/iris_ds.csv --label species
 ## 4. What Happens on `run`
 1. **Load data**.
 2. Resolve **features** (`x_cols`) & **target** (`y_col`). Sequence columns are summarized if `sequence_mode="stats"`.
-3. Split train/test (optionally stratified).
-4. Build a `Pipeline(StandardScaler? → MLPClassifier)` and **fit**.
+3. Split train/test (optionally stratified and/or balanced as configured).
+4. Fit the selected model (MLP or CNN) with optional standardization.
 5. Print a terminal report and **save artifacts**.
 
 Example terminal output (abridged):
 
 ```
-[mi-race] Loaded dataset with columns: ['cell_id', 'time_trace', 'dis_to_target', 'cMax', 'cVar']
-[mi-race] Sequence column 'time_trace' converted to stats: ['time_trace_len', 'time_trace_mean', ...]
-[mi-race] Final feature columns (n=...): ['cMax', 'cVar', 'time_trace_len', ...]
-[mi-race] Class distribution (full): {0: 90, 1: 732, ...}
+[mi-race] Loaded dataset with columns: ['cell_id', 'time_trace', 'dis_to_target', 'simulation_file', 'noise', 'cMax', 'cVar']
+[mi-race] Balancing enabled: undersampled each class to min_count=4800
+[mi-race] Class distribution (before): {0: 4800, 1: 28800, 2: 57600, 3: 86400, 4: 48000, 5: 9600}
+[mi-race] Class distribution (after):  {0: 4800, 1: 4800, 2: 4800, 3: 4800, 4: 4800, 5: 4800}
+[mi-race] Final feature columns (n=1003):
+Split groups:
+- time_trace_*: time_trace_0..time_trace_1000 (1001 cols)
+- Other features (2): cMax, cVar
+[mi-race] Saved processed features to: outputs\processed_features.csv
+[mi-race] Class distribution (full): {0: 4800, 1: 4800, 2: 4800, 3: 4800, 4: 4800, 5: 4800}
 
-=== Preview (first rows) ===
- cell_id  time_trace                        dis_to_target   cMax     cVar
- 0        [1.0000, 1.0001, …, 1.0366] ...  4               1.1296   0.0020
- ...
+[mi-race] ===== Running model: cnn =====
+[mi-race][cnn] Using split sequence group 'time_trace' with 1001 steps
+[mi-race][cnn] Total rows: 28800
+[mi-race][cnn] Class distribution (train): {0: 3840, 1: 3840, 2: 3840, 3: 3840, 4: 3840, 5: 3840}
+[mi-race][cnn] Class distribution (test):  {0: 960, 1: 960, 2: 960, 3: 960, 4: 960, 5: 960}
+[mi-race][cnn] epoch 5/15  train_loss=1.0270 train_acc=0.5427  test_loss=1.1568 test_acc=0.4837
+[cnn] epoch 10/15:  66%|███████████████████████████████████████▉                     | 236/360 [00:04<00:02, 54.20it/s]
 
-Total rows: 235,200  •  Classes: [0, 1, 2, 3, 4, 5]
+=== Training for noise 0.01 (cnn) ===
+[mi-race][cnn] Using split sequence group 'time_trace' with 1001 steps
+[mi-race][cnn] Total rows: 6120
+[mi-race][cnn] Class distribution (train): {0: 800, 1: 805, 2: 835, 3: 801, 4: 844, 5: 811}
+[mi-race][cnn] Class distribution (test):  {0: 200, 1: 201, 2: 209, 3: 200, 4: 211, 5: 203}
+[mi-race][cnn] epoch 5/15  train_loss=0.7874 train_acc=0.6591  test_loss=0.9462 test_acc=0.5711
+[mi-race][cnn] epoch 10/15  train_loss=0.4550 train_acc=0.8346  test_loss=1.1939 test_acc=0.5564
+[mi-race][cnn] epoch 15/15  train_loss=0.0470 train_acc=0.9953  test_loss=2.2383 test_acc=0.5547
+[mi-race][cnn] final test: loss=2.2383 acc=0.5547
+[mi-race][cnn] noise=0.01  accuracy=0.5547  epochs=15
+Confusion Matrix (noise=0.01):
+        pred_0  pred_1  pred_2  pred_3  pred_4  pred_5
+true_0     198       2       0       0       0       0
+true_1       0     181      10       6       2       2
+true_2       0      11     103      21      43      31
+true_3       0       1      43      49      59      48
+true_4       0       4      29      49      83      46
+true_5       0       2      27      48      61      65
+MI: I(true;pred)=1.1216  NMI_sqrt=0.4347  NMI_min=0.4354  NMI_max=0.4340
 
-=== Metrics (test) ===
-Accuracy: 41.65%
-Macro F1: 30.12%
-
-=== Confusion Matrix (test) ===
-          0     1     2     3     4     5
-    ------------------------------------
-  0 |    86     7     1     2     0     0
-  1 |     0   388    81    69    35     3
-  2 |     0    71   433   426   197    25
-  3 |     2    82   380   750   444    70
-  4 |     0    52   170   386   295    57
-  5 |     0     6    39    86    51    10
-
-=== Classification Report (test) ===
-precision recall f1-score support
 ...
 ```
-
-Artifacts saved:
-- `outputs/confusion_matrix_global.csv` (counts matrix; unlabeled CSV for easy downstream use)
-
 ---
 
-## Command reference
+## 5. What Happens on `compare`
+- Read the outputs of training process in `outputs/processed_features.csv`
+- Plot the graphs for comparing models' accuracy and accuracy vs. noise for each model
 
-### `load`
-Preview a CSV quickly (first 5 rows), and optionally show the number of unique classes in a label column.
+Example terminal output:
 ```
-mi-race load path/to/file.csv --label dis_to_target
+=== Model Accuracy (Overall) ===
+   cnn |█████████████████████████████████████████                                                 | 0.4528
+   mlp |███████████████████████████████████████                                                   | 0.4335
+
+=== Accuracy vs Noise (grouped bars) ===
+  Legend: ■ mlp  ■ cnn
+
+noise 0.01:
+     mlp |███████████████████████████████████████████████████                                             | 0.5327
+     cnn |█████████████████████████████████████████████████████                                           | 0.5547
+
+noise 0.02:
+     mlp |█████████████████████████████████████████████                                                   | 0.4711
+     cnn |██████████████████████████████████████████████                                                  | 0.4770
+
 ```
 
-### `run`
-Run training and evaluation from a JSON config.
-```
-mi-race run --model mlp -c config.json
-# or
-python -m mi_race.cli.main run --model mlp -c config.json
-```
+--- 
+Artifacts saved:
+- `outputs/processed_features.csv` (features actually used for training)
+- `outputs/summary_models.csv` (row‑per‑model summary)
+  - columns: `model`, `accuracy`, and any `noise_XX.XX` columns populated when per‑noise training runs
+- Per‑model directory with detailed artifacts:
+  - `outputs/mlp/` and/or `outputs/cnn/`
+    - `confusion_matrix.csv`
+    - `confusion_matrix_info.json` (mutual information and related stats computed from the confusion matrix)
+    - `report.txt` (human‑readable summary)
+
+Per‑noise training and summaries:
+- If your dataset filenames contain a pattern like `noise_0.01`, a `noise` column is parsed automatically.
+- When present, the CLI also trains per noise level and prints accuracy, confusion matrix, and MI per noise.
+- Per‑noise overall accuracies are written to `outputs/summary_models.csv` under columns like `noise_0.01`, `noise_0.02`, ...
 
 ---
 
