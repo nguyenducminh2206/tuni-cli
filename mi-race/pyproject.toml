@@ -19,7 +19,8 @@ dependencies = [
   "seaborn",
   "torch",
   "tabulate",
-  "tqdm"
+  "tqdm",
+  "plotext"
 ]
 
 [tool.setuptools.packages.find]

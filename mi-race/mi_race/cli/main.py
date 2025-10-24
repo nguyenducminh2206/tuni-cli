@@ -1,6 +1,7 @@
 import argparse
 from importlib.metadata import version, PackageNotFoundError
 from mi_race.train.orchestrator import run_cmd
+from mi_race.reporting.compare_models import run_compare
 
 
 def _pkg_version() -> str:
@@ -31,6 +32,10 @@ def main() -> None:
     )
     p_run.add_argument("-c", "--config", default="config.json", help="config json path")
     p_run.set_defaults(func=run_cmd)
+
+    # mi-race compare
+    p_cmp = sub.add_parser("compare", help="plot overall accuracy and accuracy vs noise from outputs/summary_models.csv")
+    p_cmp.set_defaults(func=run_compare)
 
     args = parser.parse_args()
     args.func(args)
