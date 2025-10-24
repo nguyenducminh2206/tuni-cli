@@ -11,6 +11,7 @@ from pathlib import Path
 import json
 
 import re
+import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 
@@ -250,22 +251,7 @@ def run_cmd(args):
         else:
             print("[mi-race] Balancing requested but no valid label counts; proceeding without balancing.")
 
-    # Build features on the (optionally balanced) dataframe
-    feature_df, resolved_feature_cols = build_features_from_config(df, cfg)
-    summary_cols_text = _summarize_feature_columns(resolved_feature_cols)
-    print(f"[mi-race] Final feature columns (n={len(resolved_feature_cols)}):\n{summary_cols_text}")
-
-    # Save processed features
-    out_cfg = cfg.get("output", {})
-    base_out = Path(out_cfg.get("dir", "outputs"))
-    dp_ensure_outdir(base_out)
-    # Sanitize legacy summary file once per run
-    _sanitize_summary_models(base_out)
-    feature_df_path = base_out / "processed_features.csv"
-    feature_df.to_csv(feature_df_path, index=False)
-    print(f"[mi-race] Saved processed features to: {feature_df_path}")
-    
-
+    # Determine which model to run (before building features so we can skip splits for RNN)
     # Build arrays for general stats and counts (from the data actually used for training)
     y = df[y_col].to_numpy()
     full_counts = pd.Series(y).value_counts().sort_index()
@@ -277,29 +263,53 @@ def run_cmd(args):
     standardize = bool(train_cfg.get("standardize", True))
     stratify = y if train_cfg.get("stratify", True) else None
 
-    # Determine which model to run
     model_section = cfg.get("model", {})
     selection = getattr(args, "model", None)
-    if selection not in (None, "mlp", "cnn"):
-        raise SystemExit("[mi-race] Unsupported --model value. Use 'mlp' or 'cnn'.")
-    if selection in ("mlp", "cnn"):
+    if selection not in (None, "mlp", "cnn", "rnn"):
+        raise SystemExit("[mi-race] Unsupported --model value. Use 'mlp', 'cnn', or 'rnn'.")
+    if selection in ("mlp", "cnn", "rnn"):
         mtype = selection
         selected_cfg = model_section.get(mtype, model_section.get(mtype, {})) if isinstance(model_section, dict) else {}
     else:
         # default by config
-        if isinstance(model_section, dict) and any(k in ("mlp", "cnn") for k in model_section.keys()):
+        if isinstance(model_section, dict) and any(k in ("mlp", "cnn", "rnn") for k in model_section.keys()):
             if "mlp" in model_section:
                 mtype = "mlp"
                 selected_cfg = model_section["mlp"]
             elif "cnn" in model_section:
                 mtype = "cnn"
                 selected_cfg = model_section["cnn"]
+            elif "rnn" in model_section:
+                mtype = "rnn"
+                selected_cfg = model_section["rnn"]
             else:
                 mtype = "mlp"
                 selected_cfg = {}
         else:
             mtype = str(model_section.get("type", "mlp")).lower() if isinstance(model_section, dict) else "mlp"
             selected_cfg = model_section if isinstance(model_section, dict) else {}
+
+    # For non-RNN models, build features (which may include split groups) and save
+    if mtype in ("mlp", "cnn"):
+        feature_df, resolved_feature_cols = build_features_from_config(df, cfg)
+        summary_cols_text = _summarize_feature_columns(resolved_feature_cols)
+        print(f"[mi-race] Final feature columns (n={len(resolved_feature_cols)}):\n{summary_cols_text}")
+
+        # Save processed features
+        out_cfg = cfg.get("output", {})
+        base_out = Path(out_cfg.get("dir", "outputs"))
+        dp_ensure_outdir(base_out)
+        # Sanitize legacy summary file once per run
+        _sanitize_summary_models(base_out)
+        feature_df_path = base_out / "processed_features.csv"
+        feature_df.to_csv(feature_df_path, index=False)
+        print(f"[mi-race] Saved processed features to: {feature_df_path}")
+    else:
+        # For RNN, we keep raw sequences and skip split feature preview/export
+        out_cfg = cfg.get("output", {})
+        base_out = Path(out_cfg.get("dir", "outputs"))
+        dp_ensure_outdir(base_out)
+        _sanitize_summary_models(base_out)
     print(f"\n[mi-race] ===== Running model: {mtype} =====")
     if mtype == "mlp":
         # Regular overall training run
@@ -402,8 +412,103 @@ def run_cmd(args):
                     )
                 )
                 _update_noise_accuracy_summary(base_out, "cnn", float(noise_level), float(acc_sub))
+    elif mtype == "rnn":
+        # Use original df to keep raw sequences for RNN
+        from .models.rnn import run_rnn
+        seq_col_for_log = None
+        try:
+            # selected_cfg may be dict or something falsy
+            if isinstance(selected_cfg, dict):
+                seq_col_for_log = selected_cfg.get("sequence_col", "time_trace")
+        except Exception:
+            seq_col_for_log = "time_trace"
+        if seq_col_for_log is None:
+            seq_col_for_log = "time_trace"
+        print(
+            f"[mi-race][rnn] Using raw sequence column '{seq_col_for_log}' from the original dataframe. "
+            "Split feature columns (data.sequence_mode='split') are ignored for RNN."
+        )
+        # Also export a processed_features_rnn.csv with padded/truncated sequences for inspection
+        try:
+            if seq_col_for_log in df.columns:
+                # Build fixed-length matrix for export (not used for training)
+                pad_value = float(selected_cfg.get("pad_value", 0.0)) if isinstance(selected_cfg, dict) else 0.0
+                seq_series = df[seq_col_for_log].apply(
+                    lambda x: (np.asarray(x, dtype=float).reshape(-1)
+                               if isinstance(x, (list, tuple, np.ndarray)) else np.array([], dtype=float))
+                )
+                lengths = seq_series.apply(lambda a: a.size)
+                max_len_all = int(lengths.max()) if lengths.size > 0 else 0
+                # Prefer model.rnn.export_len, else model.rnn.max_len, else cap global max to 1000 for file size
+                export_len = None
+                if isinstance(selected_cfg, dict) and selected_cfg.get("export_len") is not None:
+                    export_len = int(selected_cfg.get("export_len"))
+                elif isinstance(selected_cfg, dict) and selected_cfg.get("max_len") is not None:
+                    export_len = int(selected_cfg.get("max_len"))
+                else:
+                    export_len = min(max_len_all, 1000)
+                if export_len and export_len > 0:
+                    mat = np.full((len(seq_series), export_len), pad_value, dtype=float)
+                    for i, arr in enumerate(seq_series):
+                        m = min(arr.size, export_len)
+                        if m:
+                            mat[i, :m] = arr[:m]
+                    cols = [f"{seq_col_for_log}_{i}" for i in range(export_len)]
+                    export_df = pd.DataFrame(mat, columns=cols)
+                    # Prepend label and seq_len if available
+                    export_df.insert(0, "seq_len", lengths.to_numpy())
+                    if y_col in df.columns:
+                        export_df.insert(0, y_col, df[y_col].to_numpy())
+                    export_path = base_out / "processed_features_rnn.csv"
+                    export_df.to_csv(export_path, index=False)
+                    print(f"[mi-race][rnn] Saved processed RNN features to: {export_path} (export_len={export_len})")
+        except Exception as e:
+            print(f"[mi-race][rnn][WARN] Failed to export processed RNN features: {e}")
+        y_test, y_pred = run_rnn(df, y, train_cfg, selected_cfg, random_state, stratify)
+        # Per-noise loop for RNN as well
+        if "noise" in df.columns:
+            try:
+                noise_levels = sorted(pd.Series(df["noise"]).dropna().unique().tolist())
+            except Exception:
+                noise_levels = []
+            for noise_level in noise_levels:
+                print(f"\n=== Training for noise {noise_level} (rnn) ===")
+                mask = df["noise"] == noise_level
+                df_sub = df.loc[mask].reset_index(drop=True)
+                y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
+                if df_sub.empty or len(y_sub) == 0:
+                    print(f"[mi-race][rnn] Skipping noise {noise_level}: no rows after filtering")
+                    continue
+                sub_stratify = y_sub if train_cfg.get("stratify", True) else None
+                y_t_sub, y_p_sub = run_rnn(
+                    df_sub,
+                    y_sub,
+                    train_cfg,
+                    selected_cfg,
+                    random_state,
+                    sub_stratify,
+                )
+                acc_sub = accuracy_score(y_t_sub, y_p_sub)
+                labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
+                cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
+                info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
+                epochs_rnn = int(selected_cfg.get("epochs", 5)) if isinstance(selected_cfg, dict) else 5
+                print(
+                    f"[mi-race][rnn] noise={noise_level}  accuracy={acc_sub:.4f}  epochs={epochs_rnn}"
+                )
+                print("Confusion Matrix (noise={}):".format(noise_level))
+                print(pd.DataFrame(cm_sub, index=[f"true_{l}" for l in labels_sub], columns=[f"pred_{l}" for l in labels_sub]))
+                print(
+                    "MI: I(true;pred)={:.4f}  NMI_sqrt={:.4f}  NMI_min={:.4f}  NMI_max={:.4f}".format(
+                        info_sub.get("I", float("nan")),
+                        info_sub.get("NMI_sqrt", float("nan")),
+                        info_sub.get("NMI_min", float("nan")),
+                        info_sub.get("NMI_max", float("nan")),
+                    )
+                )
+                _update_noise_accuracy_summary(base_out, "rnn", float(noise_level), float(acc_sub))
     else:
-        raise SystemExit("[mi-race] Unknown model type. Supported: 'mlp', 'cnn'.")
+        raise SystemExit("[mi-race] Unknown model type. Supported: 'mlp', 'cnn', 'rnn'.")
 
     # Metrics
     acc = accuracy_score(y_test, y_pred)

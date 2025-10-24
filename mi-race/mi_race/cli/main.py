@@ -27,8 +27,8 @@ def main() -> None:
     p_run = sub.add_parser("run", help="train/evaluate a model from json config")
     p_run.add_argument(
         "--model",
-        choices=["mlp", "cnn"],
-        help="model selection ('mlp' or 'cnn'). Run the command once per model.",
+        choices=["mlp", "cnn", "rnn"],
+        help="model selection ('mlp', 'cnn', or 'rnn'). Run the command once per model.",
     )
     p_run.add_argument("-c", "--config", default="config.json", help="config json path")
     p_run.set_defaults(func=run_cmd)

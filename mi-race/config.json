@@ -25,7 +25,19 @@
             "fc": 128,
             "epochs": 15,
             "lr": 0.001,
-            "batch_size": 64
+            "batch_size": 8
+        },
+        "rnn": {
+            "sequence_col": "time_trace",
+            "max_len": 500,
+            "pad_value": 0.0,
+            "standardize": true,
+            "hidden_size": 128,
+            "num_layers": 1,
+            "bidirectional": true,
+            "batch_size": 8,
+            "epochs": 5,
+            "lr": 0.001
         }
     },
     "train": {
