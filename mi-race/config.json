@@ -3,7 +3,8 @@
         "path": "data_7x7",
         "x_cols": ["time_trace", "cMax", "cVar"], 
         "y_col": "dis_to_target",
-        "sequence_mode": "split" 
+        "sequence_mode": "split",
+        "balance": true
     },
 
     "model": {
