@@ -31,6 +31,8 @@ def build_df(data_path, n_samples_per_file: int = 1):
     file_paths = read_file(data_path)
 
     for file_path in file_paths:
+        # Extract metadata from filename
+        noise_level = extract_noise(os.path.basename(file_path))
         with h5py.File(file_path, 'r') as f:
             sample_keys = sorted(f['timeTraces'].keys(), key=lambda x: int(x))[:max(1, int(n_samples_per_file))]
             feature_names = list(f['features'].keys())
@@ -61,6 +63,7 @@ def build_df(data_path, n_samples_per_file: int = 1):
                         'time_trace': time_traces[cell_id],
                         'dis_to_target': distance_to_target[cell_id],
                         'simulation_file': os.path.basename(file_path),
+                        'noise': noise_level,
                         'cMax': feature_vectors['cMax'][cell_id],
                         'cVar': feature_vectors['cVariance'][cell_id]
                     }
@@ -72,7 +75,12 @@ def build_df(data_path, n_samples_per_file: int = 1):
 
 def extract_noise(filename):
     match = re.search(r'noise[_\-]?([0-9.]+)', filename)
-    return float(match.group(1) if match else None)
+    if not match:
+        return np.nan
+    try:
+        return float(match.group(1))
+    except Exception:
+        return np.nan
 
 
 def balance_data(df: pd.DataFrame, y_col: str, *, random_state: int = 42) -> pd.DataFrame:
