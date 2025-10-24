@@ -18,17 +18,21 @@ def read_file(folder_path):
     return h5_files
 
 
-def build_df(data_path):
+def build_df(data_path, n_samples_per_file: int = 1):
     """
-    For each .h5 file, for the first 100 samples, extract time traces, distance to target,
-    and all feature values (per feature, per sample, per cell), filling missing with NaN.
+    Build a dataframe from a directory of HDF5 files.
+
+    For each .h5 file, take the first `n_samples_per_file` samples, and extract:
+    - time traces (per cell)
+    - distance to target (per cell)
+    - selected feature vectors (per feature, per sample, per cell), filling missing with NaN.
     """
     rows = []
     file_paths = read_file(data_path)
 
     for file_path in file_paths:
         with h5py.File(file_path, 'r') as f:
-            sample_keys = sorted(f['timeTraces'].keys(), key=lambda x: int(x))[:1]  # first 100 samples
+            sample_keys = sorted(f['timeTraces'].keys(), key=lambda x: int(x))[:max(1, int(n_samples_per_file))]
             feature_names = list(f['features'].keys())
 
             for sample_idx, sample_key in enumerate(sample_keys):
@@ -56,7 +60,7 @@ def build_df(data_path):
                         'cell_id': cell_id,
                         'time_trace': time_traces[cell_id],
                         'dis_to_target': distance_to_target[cell_id],
-                        #'simulation_file': os.path.basename(file_path),
+                        'simulation_file': os.path.basename(file_path),
                         'cMax': feature_vectors['cMax'][cell_id],
                         'cVar': feature_vectors['cVariance'][cell_id]
                     }
@@ -69,4 +73,27 @@ def build_df(data_path):
 def extract_noise(filename):
     match = re.search(r'noise[_\-]?([0-9.]+)', filename)
     return float(match.group(1) if match else None)
+
+
+def balance_data(df: pd.DataFrame, y_col: str, *, random_state: int = 42) -> pd.DataFrame:
+    """Undersample each class to the minimum class count based on y_col.
+
+    General and simple: finds min count across classes in df[y_col] and samples
+    that many rows from each class with a fixed random_state. If y_col is missing
+    or there are no valid labels, returns df unchanged.
+    """
+    if y_col not in df.columns:
+        return df
+    counts = df[y_col].dropna().value_counts()
+    if counts.empty:
+        return df
+    n_samples = int(counts.min())
+    if n_samples <= 0:
+        return df
+    return (
+        df.dropna(subset=[y_col])
+          .groupby(y_col, group_keys=False)
+          .apply(lambda x: x.sample(n=n_samples, random_state=42))
+          .reset_index(drop=True)
+    )
 
