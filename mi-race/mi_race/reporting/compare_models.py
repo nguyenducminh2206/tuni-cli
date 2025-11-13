@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import shutil
 
 import pandas as pd
@@ -24,12 +24,32 @@ def _read_summary(path: Path) -> pd.DataFrame:
 
 
 def _noise_columns(df: pd.DataFrame) -> List[str]:
-    cols = [c for c in df.columns if c.startswith("noise_")]
-    try:
-        cols = sorted(cols, key=lambda s: float(s.split("_", 1)[1]))
-    except Exception:
-        cols = sorted(cols)
-    return cols
+    # Deprecated thin wrapper: prefer using _split_prefixes to discover arbitrary split_* columns.
+    return _split_prefixes(df).get("noise", [])
+
+
+def _split_prefixes(df: pd.DataFrame) -> Dict[str, List[str]]:
+    """Discover columns of the form '<prefix>_<suffix>' and group them by prefix.
+
+    Returns a dict prefix -> sorted list of matching columns. Suffixes are sorted numerically when
+    possible, otherwise lexicographically.
+    """
+    cols = [c for c in df.columns if c not in ("model", "accuracy")]
+    groups: Dict[str, List[str]] = {}
+    for c in cols:
+        if "_" not in c:
+            continue
+        pref, suf = c.split("_", 1)
+        groups.setdefault(pref, []).append(c)
+
+    def _sort_cols(col_list: List[str]) -> List[str]:
+        try:
+            # try numeric sort on suffix
+            return sorted(col_list, key=lambda s: float(s.split("_", 1)[1]))
+        except Exception:
+            return sorted(col_list)
+
+    return {p: _sort_cols(v) for p, v in groups.items()}
 
 
 # ---------- Terminal helpers ----------
@@ -80,37 +100,50 @@ def print_model_accuracy_bar(df: pd.DataFrame) -> None:
         print(f"{model:>6} |{color}{bar}{ANSI_RESET}| {acc_txt}")
 
 
-def print_accuracy_vs_noise_grouped_bars(df: pd.DataFrame) -> None:
-    noise_cols = _noise_columns(df)
-    if not noise_cols:
-        print("\n[mi-race][compare] No noise_* columns found in summary; skipping 'accuracy vs noise'.")
+def print_accuracy_vs_noise_grouped_bars(df: pd.DataFrame, split_prefix: Optional[str] = None) -> None:
+    prefixes = _split_prefixes(df)
+    if split_prefix:
+        if split_prefix not in prefixes:
+            print(f"\n[mi-race][compare] No columns found for split prefix '{split_prefix}'; available: {sorted(prefixes.keys())}")
+            return
+        prefixes = {split_prefix: prefixes[split_prefix]}
+    if not prefixes:
+        print("\n[mi-race][compare] No per-split columns (like noise_* or kcross_*) found in summary; skipping grouped comparisons.")
         return
 
     # Models in the order they appear
     models = [str(m) for m in df["model"].tolist()]
     width = max(10, _term_width() - 24)
 
-    print("\n=== Accuracy vs Noise (grouped bars) ===")
+    print("\n=== Accuracy vs splits (grouped bars) ===")
     # Legend
     legend = "  Legend: " + "  ".join(f"{_color_for(m)}■{ANSI_RESET} {m}" for m in models)
     print(legend)
 
-    for c in noise_cols:
-        # heading per noise
-        try:
-            noise_val = float(c.split("_", 1)[1])
-            noise_label = f"noise {noise_val:g}"
-        except Exception:
-            noise_label = c
-        print(f"\n{noise_label}:")
+    # For each prefix (e.g., noise, kcross) print grouped bars per suffix column
+    for prefix, cols in prefixes.items():
+        print(f"\n--- {prefix} ---")
+        for c in cols:
+            # heading per split column
+            try:
+                suf = c.split("_", 1)[1]
+                # try numeric label for nicer heading
+                try:
+                    suf_val = float(suf)
+                    label = f"{prefix} {suf_val:g}"
+                except Exception:
+                    label = f"{prefix} {suf}"
+            except Exception:
+                label = c
+            print(f"\n{label}:")
 
-        for _, row in df.iterrows():
-            model = str(row.get("model"))
-            acc = pd.to_numeric(row.get(c), errors="coerce")
-            color = _color_for(model)
-            bar = _bar(acc if pd.notna(acc) else 0.0, width)
-            acc_txt = f"{float(acc):.4f}" if pd.notna(acc) else "nan"
-            print(f"  {model:>6} |{color}{bar}{ANSI_RESET}| {acc_txt}")
+            for _, row in df.iterrows():
+                model = str(row.get("model"))
+                acc = pd.to_numeric(row.get(c), errors="coerce")
+                color = _color_for(model)
+                bar = _bar(acc if pd.notna(acc) else 0.0, width)
+                acc_txt = f"{float(acc):.4f}" if pd.notna(acc) else "nan"
+                print(f"  {model:>6} |{color}{bar}{ANSI_RESET}| {acc_txt}")
 
 
 def run_compare(args=None) -> None:
@@ -119,4 +152,8 @@ def run_compare(args=None) -> None:
     path = base / "summary_models.csv"
     df = _read_summary(path)
     print_model_accuracy_bar(df)
-    print_accuracy_vs_noise_grouped_bars(df)
+    # If args provided, allow restricting to a single split prefix via args.split
+    split_pref = None
+    if args is not None and hasattr(args, "split"):
+        split_pref = getattr(args, "split")
+    print_accuracy_vs_noise_grouped_bars(df, split_pref)

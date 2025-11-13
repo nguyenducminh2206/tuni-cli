@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
-
-import re
 import numpy as np
 import pandas as pd
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
@@ -23,182 +21,13 @@ from .data_prep import (
 )
 from .models.mlp import run_mlp
 from ..reporting.report import build_report_text, save_per_model_artifacts
+from .orchestrator_utils import (
+    _summarize_feature_columns,
+    _update_accuracy_summary,
+    _sanitize_summary_models,
+    _update_split_accuracy_summary,
+)
 
-
-def _summarize_feature_columns(cols: list[str], *, threshold: int = 5, max_show_other: int = 20) -> str:
-    """Summarize feature columns compactly.
-
-    - Detect split sequence groups of the form '<prefix>_<idx>' where count >= threshold.
-    - Print each group as: '<prefix>_*: <prefix>_<min>.. <prefix>_<max> (<count> cols)'
-    - Then list a shortened set of non-grouped feature names up to max_show_other.
-    """
-    pat = re.compile(r"^(?P<prefix>.+)_(?P<idx>\d+)$")
-    groups: dict[str, list[tuple[int, str]]] = {}
-    grouped_cols: set[str] = set()
-
-    for c in cols:
-        m = pat.match(c)
-        if not m:
-            continue
-        pref = m.group("prefix")
-        idx = int(m.group("idx"))
-        groups.setdefault(pref, []).append((idx, c))
-
-    # Decide which prefixes qualify as split groups
-    split_summaries = []
-    for pref, items in sorted(groups.items()):
-        if len(items) >= threshold:
-            items_sorted = sorted(items, key=lambda t: t[0])
-            min_idx = items_sorted[0][0]
-            max_idx = items_sorted[-1][0]
-            count = len(items_sorted)
-            split_summaries.append(f"- {pref}_*: {pref}_{min_idx}..{pref}_{max_idx} ({count} cols)")
-            for _, name in items_sorted:
-                grouped_cols.add(name)
-
-    # Non-grouped columns
-    other_cols = [c for c in cols if c not in grouped_cols]
-    other_display = other_cols[:max_show_other]
-    more = len(other_cols) - len(other_display)
-    other_line = "- Other features ({}): {}{}".format(
-        len(other_cols),
-        ", ".join(other_display),
-        f" … (+{more} more)" if more > 0 else "",
-    )
-
-    lines = []
-    if split_summaries:
-        lines.append("Split groups:")
-        lines.extend(split_summaries)
-    lines.append(other_line)
-    return "\n".join(lines)
-
-
-def _update_accuracy_summary(base_out: Path, model_name: str, accuracy: float) -> Path:
-    """Update outputs/summary_models.csv with overall accuracy per model (row-per-model)."""
-    path = base_out / "summary_models.csv"
-    # Load or initialize
-    if path.exists():
-        try:
-            df = pd.read_csv(path)
-        except Exception:
-            df = pd.DataFrame(columns=["model", "accuracy"])
-    else:
-        df = pd.DataFrame(columns=["model", "accuracy"])
-
-    # Ensure required columns
-    if "model" not in df.columns:
-        df["model"] = pd.Series(dtype=str)
-    if "accuracy" not in df.columns:
-        df["accuracy"] = pd.Series(dtype=float)
-
-    # Work with 'model' as index for clean updates (avoids concat warnings)
-    df = df.set_index("model", drop=False)
-    if model_name not in df.index:
-        df.loc[model_name, "model"] = model_name
-    df.loc[model_name, "accuracy"] = float(accuracy)
-
-    # Order columns: model, accuracy, then noise_* columns (sorted by numeric noise)
-    noise_cols = [c for c in df.columns if c.startswith("noise_")]
-    try:
-        noise_cols = sorted(noise_cols, key=lambda s: float(s.split("_", 1)[1]))
-    except Exception:
-        noise_cols = sorted(noise_cols)
-    ordered_cols = ["model", "accuracy"] + noise_cols
-    df = df[ordered_cols]
-    df.to_csv(path, index=False)
-    return path
-
-
-def _update_noise_accuracy_summary(base_out: Path, model_name: str, noise: float, accuracy: float) -> Path:
-    """Update outputs/summary_models.csv with per-noise accuracy for a given model (row-per-model)."""
-    path = base_out / "summary_models.csv"
-    # Load or initialize
-    if path.exists():
-        try:
-            df = pd.read_csv(path)
-        except Exception:
-            df = pd.DataFrame(columns=["model", "accuracy"])
-    else:
-        df = pd.DataFrame(columns=["model", "accuracy"])
-
-    # Ensure 'model' column
-    if "model" not in df.columns:
-        df["model"] = pd.Series(dtype=str)
-    if "accuracy" not in df.columns:
-        df["accuracy"] = pd.Series(dtype=float)
-
-    # Column name for this noise (stable two-decimal format)
-    noise_col = f"noise_{noise:.2f}"
-    if noise_col not in df.columns:
-        df[noise_col] = pd.Series(dtype=float)
-
-    # Index and update
-    df = df.set_index("model", drop=False)
-    if model_name not in df.index:
-        df.loc[model_name, "model"] = model_name
-    df.loc[model_name, noise_col] = float(accuracy)
-
-    # Order columns
-    noise_cols = [c for c in df.columns if c.startswith("noise_")]
-    try:
-        noise_cols = sorted(noise_cols, key=lambda s: float(s.split("_", 1)[1]))
-    except Exception:
-        noise_cols = sorted(noise_cols)
-    ordered_cols = ["model", "accuracy"] + noise_cols
-    df = df[ordered_cols]
-    df.to_csv(path, index=False)
-    return path
-
-
-def _sanitize_summary_models(base_out: Path) -> Path:
-    """Clean up legacy rows/columns in outputs/summary_models.csv.
-
-    - Drop rows with missing model or model starting with 'noise_'
-    - Drop legacy columns: 'noise', '*_accuracy', '*_epochs'
-    - Keep row-per-model with columns: model, accuracy, noise_*
-    """
-    path = base_out / "summary_models.csv"
-    if not path.exists():
-        return path
-    try:
-        df = pd.read_csv(path)
-    except Exception:
-        return path
-
-    if "model" not in df.columns:
-        return path
-
-    # Drop legacy rows (where model is NaN or startswith 'noise_')
-    df = df.dropna(subset=["model"]).copy()
-    df = df[~df["model"].astype(str).str.startswith("noise_")]
-
-    # Drop legacy columns: 'noise' and any '*_accuracy', '*_epochs' except 'accuracy'
-    legacy_cols = []
-    if "noise" in df.columns:
-        legacy_cols.append("noise")
-    for c in list(df.columns):
-        if c.endswith("_accuracy") or c.endswith("_epochs"):
-            if c != "accuracy":
-                legacy_cols.append(c)
-    legacy_cols = list(dict.fromkeys(legacy_cols))
-    if legacy_cols:
-        df = df.drop(columns=legacy_cols, errors="ignore")
-
-    # Ensure required columns
-    if "accuracy" not in df.columns:
-        df["accuracy"] = pd.Series(dtype=float)
-
-    # Order columns: model, accuracy, noise_*
-    noise_cols = [c for c in df.columns if c.startswith("noise_")]
-    try:
-        noise_cols = sorted(noise_cols, key=lambda s: float(s.split("_", 1)[1]))
-    except Exception:
-        noise_cols = sorted(noise_cols)
-    ordered_cols = ["model", "accuracy"] + noise_cols
-    df = df[[c for c in ordered_cols if c in df.columns]]
-    df.to_csv(path, index=False)
-    return path
 
 
 def run_cmd(args):
@@ -263,6 +92,14 @@ def run_cmd(args):
     standardize = bool(train_cfg.get("standardize", True))
     stratify = y if train_cfg.get("stratify", True) else None
 
+    # Which column to split per-feature (e.g., 'noise' or 'kcross') for per-slice runs
+    # Prefer explicit setting in data section, else train section, default to 'noise'
+    split_feature = None
+    if isinstance(data_cfg, dict):
+        split_feature = data_cfg.get("split_by")
+    if not split_feature:
+        split_feature = train_cfg.get("split_by", "noise")
+
     model_section = cfg.get("model", {})
     selection = getattr(args, "model", None)
     if selection not in (None, "mlp", "cnn", "rnn", "rf"):
@@ -318,20 +155,20 @@ def run_cmd(args):
         # Regular overall training run
         y_test, y_pred = run_mlp(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify, full_counts)
 
-        # Additionally: train per noise level if a 'noise' column exists
-        if "noise" in df.columns:
+        # Additionally: train per-split feature (e.g., noise or kcross) if that column exists
+        if split_feature in df.columns:
             try:
-                noise_levels = sorted(pd.Series(df["noise"]).dropna().unique().tolist())
+                split_levels = sorted(pd.Series(df[split_feature]).dropna().unique().tolist())
             except Exception:
-                noise_levels = []
-            for noise_level in noise_levels:
-                print(f"\n=== Training for noise {noise_level} ===")
-                mask = df["noise"] == noise_level
+                split_levels = []
+            for split_value in split_levels:
+                print(f"\n=== Training for {split_feature} {split_value} ===")
+                mask = df[split_feature] == split_value
                 # Subset features and labels using the same row order
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
                 if feature_df_sub.empty or len(y_sub) == 0:
-                    print(f"[mi-race][mlp] Skipping noise {noise_level}: no rows after filtering")
+                    print(f"[mi-race][mlp] Skipping {split_feature} {split_value}: no rows after filtering")
                     continue
                 sub_counts = pd.Series(y_sub).value_counts().sort_index()
                 sub_stratify = y_sub if train_cfg.get("stratify", True) else None
@@ -351,11 +188,11 @@ def run_cmd(args):
                 labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
                 cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
-                # Print noise-level summary with epochs, CM, and MI
+                # Print split-level summary with epochs, CM, and MI
                 print(
-                    f"[mi-race][mlp] noise={noise_level}  accuracy={acc_sub:.4f}  epochs={epochs_like}"
+                    f"[mi-race][mlp] {split_feature}={split_value}  accuracy={acc_sub:.4f}  epochs={epochs_like}"
                 )
-                print("Confusion Matrix (noise={}):".format(noise_level))
+                print("Confusion Matrix ({}={}):".format(split_feature, split_value))
                 print(pd.DataFrame(cm_sub, index=[f"true_{l}" for l in labels_sub], columns=[f"pred_{l}" for l in labels_sub]))
                 print(
                     "MI: I(true;pred)={:.4f}  NMI_sqrt={:.4f}  NMI_min={:.4f}  NMI_max={:.4f}".format(
@@ -365,25 +202,25 @@ def run_cmd(args):
                         info_sub.get("NMI_max", float("nan")),
                     )
                 )
-                _update_noise_accuracy_summary(base_out, "mlp", float(noise_level), float(acc_sub))
+                _update_split_accuracy_summary(base_out, "mlp", split_feature, split_value, float(acc_sub))
     elif mtype == "cnn":
         # Lazy import to avoid requiring torch unless needed
         from .models.cnn import run_cnn
         y_test, y_pred = run_cnn(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
 
-        # Per-noise loop for CNN as well
-        if "noise" in df.columns:
+        # Per-split-feature loop for CNN as well
+        if split_feature in df.columns:
             try:
-                noise_levels = sorted(pd.Series(df["noise"]).dropna().unique().tolist())
+                split_levels = sorted(pd.Series(df[split_feature]).dropna().unique().tolist())
             except Exception:
-                noise_levels = []
-            for noise_level in noise_levels:
-                print(f"\n=== Training for noise {noise_level} (cnn) ===")
-                mask = df["noise"] == noise_level
+                split_levels = []
+            for split_value in split_levels:
+                print(f"\n=== Training for {split_feature} {split_value} (cnn) ===")
+                mask = df[split_feature] == split_value
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
                 if feature_df_sub.empty or len(y_sub) == 0:
-                    print(f"[mi-race][cnn] Skipping noise {noise_level}: no rows after filtering")
+                    print(f"[mi-race][cnn] Skipping {split_feature} {split_value}: no rows after filtering")
                     continue
                 sub_stratify = y_sub if train_cfg.get("stratify", True) else None
                 y_t_sub, y_p_sub = run_cnn(
@@ -402,9 +239,9 @@ def run_cmd(args):
                 # Epochs from CNN config
                 epochs_cnn = int(selected_cfg.get("epochs", 5)) if isinstance(selected_cfg, dict) else 5
                 print(
-                    f"[mi-race][cnn] noise={noise_level}  accuracy={acc_sub:.4f}  epochs={epochs_cnn}"
+                    f"[mi-race][cnn] {split_feature}={split_value}  accuracy={acc_sub:.4f}  epochs={epochs_cnn}"
                 )
-                print("Confusion Matrix (noise={}):".format(noise_level))
+                print("Confusion Matrix ({}={}):".format(split_feature, split_value))
                 print(pd.DataFrame(cm_sub, index=[f"true_{l}" for l in labels_sub], columns=[f"pred_{l}" for l in labels_sub]))
                 print(
                     "MI: I(true;pred)={:.4f}  NMI_sqrt={:.4f}  NMI_min={:.4f}  NMI_max={:.4f}".format(
@@ -414,24 +251,24 @@ def run_cmd(args):
                         info_sub.get("NMI_max", float("nan")),
                     )
                 )
-                _update_noise_accuracy_summary(base_out, "cnn", float(noise_level), float(acc_sub))
+                _update_split_accuracy_summary(base_out, "cnn", split_feature, split_value, float(acc_sub))
     elif mtype == "rf":
         from .models.random_forest import run_random_forest
         y_test, y_pred = run_random_forest(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
 
-        # Per-noise loop for RF
-        if "noise" in df.columns:
+        # Per-split-feature loop for RF
+        if split_feature in df.columns:
             try:
-                noise_levels = sorted(pd.Series(df["noise"]).dropna().unique().tolist())
+                split_levels = sorted(pd.Series(df[split_feature]).dropna().unique().tolist())
             except Exception:
-                noise_levels = []
-            for noise_level in noise_levels:
-                print(f"\n=== Training for noise {noise_level} (rf) ===")
-                mask = df["noise"] == noise_level
+                split_levels = []
+            for split_value in split_levels:
+                print(f"\n=== Training for {split_feature} {split_value} (rf) ===")
+                mask = df[split_feature] == split_value
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
                 if feature_df_sub.empty or len(y_sub) == 0:
-                    print(f"[mi-race][rf] Skipping noise {noise_level}: no rows after filtering")
+                    print(f"[mi-race][rf] Skipping {split_feature} {split_value}: no rows after filtering")
                     continue
                 sub_stratify = y_sub if train_cfg.get("stratify", True) else None
                 y_t_sub, y_p_sub = run_random_forest(
@@ -448,9 +285,9 @@ def run_cmd(args):
                 cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
                 print(
-                    f"[mi-race][rf] noise={noise_level}  accuracy={acc_sub:.4f}"
+                    f"[mi-race][rf] {split_feature}={split_value}  accuracy={acc_sub:.4f}"
                 )
-                print("Confusion Matrix (noise={}):".format(noise_level))
+                print("Confusion Matrix ({}={}):".format(split_feature, split_value))
                 print(pd.DataFrame(cm_sub, index=[f"true_{l}" for l in labels_sub], columns=[f"pred_{l}" for l in labels_sub]))
                 print(
                     "MI: I(true;pred)={:.4f}  NMI_sqrt={:.4f}  NMI_min={:.4f}  NMI_max={:.4f}".format(
@@ -460,7 +297,7 @@ def run_cmd(args):
                         info_sub.get("NMI_max", float("nan")),
                     )
                 )
-                _update_noise_accuracy_summary(base_out, "rf", float(noise_level), float(acc_sub))
+                _update_split_accuracy_summary(base_out, "rf", split_feature, split_value, float(acc_sub))
     elif mtype == "rnn":
         # Use original df to keep raw sequences for RNN
         from .models.rnn import run_rnn
@@ -514,19 +351,19 @@ def run_cmd(args):
         except Exception as e:
             print(f"[mi-race][rnn][WARN] Failed to export processed RNN features: {e}")
         y_test, y_pred = run_rnn(df, y, train_cfg, selected_cfg, random_state, stratify)
-        # Per-noise loop for RNN as well
-        if "noise" in df.columns:
+        # Per-split-feature loop for RNN as well
+        if split_feature in df.columns:
             try:
-                noise_levels = sorted(pd.Series(df["noise"]).dropna().unique().tolist())
+                split_levels = sorted(pd.Series(df[split_feature]).dropna().unique().tolist())
             except Exception:
-                noise_levels = []
-            for noise_level in noise_levels:
-                print(f"\n=== Training for noise {noise_level} (rnn) ===")
-                mask = df["noise"] == noise_level
+                split_levels = []
+            for split_value in split_levels:
+                print(f"\n=== Training for {split_feature} {split_value} (rnn) ===")
+                mask = df[split_feature] == split_value
                 df_sub = df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
                 if df_sub.empty or len(y_sub) == 0:
-                    print(f"[mi-race][rnn] Skipping noise {noise_level}: no rows after filtering")
+                    print(f"[mi-race][rnn] Skipping {split_feature} {split_value}: no rows after filtering")
                     continue
                 sub_stratify = y_sub if train_cfg.get("stratify", True) else None
                 y_t_sub, y_p_sub = run_rnn(
@@ -543,9 +380,9 @@ def run_cmd(args):
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
                 epochs_rnn = int(selected_cfg.get("epochs", 5)) if isinstance(selected_cfg, dict) else 5
                 print(
-                    f"[mi-race][rnn] noise={noise_level}  accuracy={acc_sub:.4f}  epochs={epochs_rnn}"
+                    f"[mi-race][rnn] {split_feature}={split_value}  accuracy={acc_sub:.4f}  epochs={epochs_rnn}"
                 )
-                print("Confusion Matrix (noise={}):".format(noise_level))
+                print("Confusion Matrix ({}={}):".format(split_feature, split_value))
                 print(pd.DataFrame(cm_sub, index=[f"true_{l}" for l in labels_sub], columns=[f"pred_{l}" for l in labels_sub]))
                 print(
                     "MI: I(true;pred)={:.4f}  NMI_sqrt={:.4f}  NMI_min={:.4f}  NMI_max={:.4f}".format(
@@ -555,7 +392,7 @@ def run_cmd(args):
                         info_sub.get("NMI_max", float("nan")),
                     )
                 )
-                _update_noise_accuracy_summary(base_out, "rnn", float(noise_level), float(acc_sub))
+                _update_split_accuracy_summary(base_out, "rnn", split_feature, split_value, float(acc_sub))
     else:
         raise SystemExit("[mi-race] Unknown model type. Supported: 'mlp', 'cnn', 'rnn'.")
 

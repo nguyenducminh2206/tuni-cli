@@ -4,6 +4,7 @@
         "x_cols": ["time_trace", "cMax", "cVar"], 
         "y_col": "dis_to_target",
         "sequence_mode": "split",
+        "split_by": "kcross",
         "balance": true
     },
 

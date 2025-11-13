@@ -32,7 +32,9 @@ def build_df(data_path, n_samples_per_file: int = 1):
 
     for file_path in file_paths:
         # Extract metadata from filename
-        noise_level = extract_noise(os.path.basename(file_path))
+        fname = os.path.basename(file_path)
+        noise_level = extract_noise(fname)
+        kcross_level = extract_kcross(fname)
         with h5py.File(file_path, 'r') as f:
             sample_keys = sorted(f['timeTraces'].keys(), key=lambda x: int(x))[:max(1, int(n_samples_per_file))]
             feature_names = list(f['features'].keys())
@@ -64,6 +66,7 @@ def build_df(data_path, n_samples_per_file: int = 1):
                         'dis_to_target': distance_to_target[cell_id],
                         'simulation_file': os.path.basename(file_path),
                         'noise': noise_level,
+                        'kcross': kcross_level,
                         'cMax': feature_vectors['cMax'][cell_id],
                         'cVar': feature_vectors['cVariance'][cell_id]
                     }
@@ -75,6 +78,20 @@ def build_df(data_path, n_samples_per_file: int = 1):
 
 def extract_noise(filename):
     match = re.search(r'noise[_\-]?([0-9.]+)', filename)
+    if not match:
+        return np.nan
+    try:
+        return float(match.group(1))
+    except Exception:
+        return np.nan
+
+
+def extract_kcross(filename):
+    """Extract kcross value from a filename like '..._kcross_0.0050_...'.
+
+    Returns float value if found, else NaN. Mirrors `extract_noise` behavior.
+    """
+    match = re.search(r'kcross[_\-]?([0-9.]+)', filename)
     if not match:
         return np.nan
     try:
@@ -105,3 +122,10 @@ def balance_data(df: pd.DataFrame, y_col: str, *, random_state: int = 42) -> pd.
           .reset_index(drop=True)
     )
 
+def main():
+    df = build_df("mi-race\data_7x7")
+    print(df.head())
+    print(df.columns)
+
+if __name__ == "__main__":
+    main()

@@ -35,6 +35,7 @@ def main() -> None:
 
     # mi-race compare
     p_cmp = sub.add_parser("compare", help="plot overall accuracy and accuracy vs noise from outputs/summary_models.csv")
+    p_cmp.add_argument("--split", help="restrict compare to a single split prefix (e.g., 'noise' or 'kcross')")
     p_cmp.set_defaults(func=run_compare)
 
     args = parser.parse_args()
