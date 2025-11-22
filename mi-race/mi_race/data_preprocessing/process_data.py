@@ -34,7 +34,7 @@ def build_df(data_path, n_samples_per_file: int = 1):
         # Extract metadata from filename
         fname = os.path.basename(file_path)
         noise_level = extract_noise(fname)
-        kcross_level = extract_kcross(fname)
+        #kcross_level = extract_kcross(fname)
         with h5py.File(file_path, 'r') as f:
             sample_keys = sorted(f['timeTraces'].keys(), key=lambda x: int(x))[:max(1, int(n_samples_per_file))]
             feature_names = list(f['features'].keys())
@@ -64,9 +64,9 @@ def build_df(data_path, n_samples_per_file: int = 1):
                         'cell_id': cell_id,
                         'time_trace': time_traces[cell_id],
                         'dis_to_target': distance_to_target[cell_id],
-                        'simulation_file': os.path.basename(file_path),
+                        #'simulation_file': os.path.basename(file_path),
                         'noise': noise_level,
-                        'kcross': kcross_level,
+                        #'kcross': kcross_level,
                         'cMax': feature_vectors['cMax'][cell_id],
                         'cVar': feature_vectors['cVariance'][cell_id]
                     }
@@ -86,18 +86,18 @@ def extract_noise(filename):
         return np.nan
 
 
-def extract_kcross(filename):
-    """Extract kcross value from a filename like '..._kcross_0.0050_...'.
+# def extract_kcross(filename):
+#     """Extract kcross value from a filename like '..._kcross_0.0050_...'.
 
-    Returns float value if found, else NaN. Mirrors `extract_noise` behavior.
-    """
-    match = re.search(r'kcross[_\-]?([0-9.]+)', filename)
-    if not match:
-        return np.nan
-    try:
-        return float(match.group(1))
-    except Exception:
-        return np.nan
+#     Returns float value if found, else NaN. Mirrors `extract_noise` behavior.
+#     """
+#     match = re.search(r'kcross[_\-]?([0-9.]+)', filename)
+#     if not match:
+#         return np.nan
+#     try:
+#         return float(match.group(1))
+#     except Exception:
+#         return np.nan
 
 
 def balance_data(df: pd.DataFrame, y_col: str, *, random_state: int = 42) -> pd.DataFrame:
