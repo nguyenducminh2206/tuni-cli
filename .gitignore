@@ -14,6 +14,11 @@ __pycache__/
 mi-race/outputs/
 mi-race/processed_data/
 
+# Root-level generated feature matrices
+outputs/processed_features.csv
+outputs/processed_features_rnn.csv
+outputs/*processed_features*.csv
+
 # Distribution / packaging
 .Python
 build/
