@@ -1,14 +1,18 @@
 # mi-race — Machine Learning for Science (CLI)
 
-A lightweight command‑line tool to train and evaluate ML models directly from the terminal on tabular and sequence‑like data. It supports:
-- Fast CSV/TSV/Parquet loading
-- Balancing dataset by undersampling to minimum label count
-- Config‑driven training for MLP and 1D CNN
-- Sequence columns (e.g. `time_trace`) → statistical expansion or split into steps
-- Clean terminal report: class counts, accuracy, macro‑F1, confusion matrix
-- Noise analysis (when a noise column exists): train per‑noise and print reports
-- Compare overall accuracy and accuracy‑vs‑noise across models (terminal charts)
-- Artifacts saved to `outputs/`
+Train and evaluate multiple models from a single `config.json`. The CLI is designed for fast iteration with clean terminal output and saved artifacts.
+
+Supported models:
+- PyTorch: MLP, 1D CNN, RNN
+- scikit-learn: Random Forest
+
+Key features:
+- Config-driven runs (`mi-race run` / `mi-race run-all`)
+- Optional class balancing (undersample to min class count)
+- Optional per-slice training by a split column (e.g. `noise`, `kcross`) via `data.split_by`
+- Clean terminal summary: boxed Results + boxed Confusion Matrix
+- Mutual information from confusion matrix + optional KSG MI (when probabilities are available)
+- Saved artifacts under `outputs/`
 
 ---
 
@@ -46,9 +50,14 @@ Why venv?
 
 ## 2. Quick CLI Usage
 
-```bash
+```powershell
 mi-race run --model mlp -c config.json
 mi-race run --model cnn -c config.json
+mi-race run --model rnn -c config.json
+mi-race run --model rf  -c config.json
+
+# Run everything sequentially
+mi-race run-all -c config.json
 
 # Compare models from outputs/summary_models.csv (prints terminal bars)
 mi-race compare
@@ -70,47 +79,63 @@ mi-race compare
 
 ## 3. Configuration (config.json)
 
+This is the current schema used by the pipeline (matches the checked-in `config.json`):
+
 ```json
 {
   "data": {
-    "path": "data_7x7",       // path/to_your/dataset
-    "y_col": "dis_to_target", // labels for the model
-    "x_cols": ["time_trace_0:time_trace_99", "cMax", "cVar"], // inputs for the model
-    "sequence_mode": "split", // 3 modes: "split" | "stats" | "ignore"
-    "balance": true // "false" if balancing data is not necessary 
+    "path": "iris.csv",
+    "x_cols": ["sepal_length", "sepal_width", "petal_length", "petal_width"],
+    "y_col": "class",
+    "sequence_mode": "split",
+    "balance": true,
+    "split_by": "noise"
   },
   "model": {
-        "mlp": {
-            "type": "mlp",
-            "hidden_layers": [128, 128],
-            "activation": "relu",
-            "solver": "adam",
-            "learning_rate_init": 0.001,
-            "alpha": 0.0001,
-            "batch_size": "auto"
-        },
-        "cnn": {
-            "type": "cnn",
-            "channels": [16, 32],
-            "kernel_size": 5,
-            "pool": 2,
-            "fc": 128,
-            "epochs": 15,
-            "lr": 0.001,
-            "batch_size": 64
-        }
+    "mlp": {
+      "type": "mlp",
+      "hidden_layers": [128, 128],
+      "activation": "relu",
+      "optimizer": "adam",
+      "lr": 0.001,
+      "dropout": 0.0,
+      "batch_size": 64,
+      "epochs": 15
     },
-    "train": {
-        "test_size": 0.2,
-        "random_state": 42,
-        "max_iter": 500,
-        "standardize": true
+    "cnn": {
+      "type": "cnn",
+      "channels": [16, 32],
+      "kernel_size": 5,
+      "pool": 2,
+      "fc": 128,
+      "epochs": 15,
+      "lr": 0.001,
+      "batch_size": 8,
+      "device": "auto"
     },
-    "output": {
-        "dir": "outputs",
-        "show_report": true
+    "rnn": {
+      "sequence_col": "time_trace",
+      "max_len": 500,
+      "pad_value": 0.0,
+      "standardize": true,
+      "hidden_size": 128,
+      "num_layers": 1,
+      "bidirectional": true,
+      "batch_size": 8,
+      "epochs": 5,
+      "lr": 0.001,
+      "device": "auto"
     }
-
+  },
+  "train": {
+    "test_size": 0.2,
+    "random_state": 42,
+    "standardize": true
+  },
+  "output": {
+    "dir": "outputs",
+    "show_report": true
+  }
 }
 ```
 
@@ -126,21 +151,23 @@ mi-race compare
   - Example: `"time_trace_1:time_trace_50"` selects columns `time_trace_1` through `time_trace_50`.
   - Can mix ranges with regular column names: `["time_trace_10:time_trace_100", "cMax", "cVar"]`
 - **`sequence_mode`**:
-  - `"stats"` (default): sequence‑like columns (Python list/ndarray) are expanded into statistical features:
-    - `len, mean, std, min, max, q10, q25, q50, q75, q90`
-  - `"split"`: sequence‑like columns are split into individual columns (e.g., `time_trace_0`, `time_trace_1`, etc.). Each element of the sequence becomes a separate feature column, preserving all temporal information.
-  - `"ignore"`: sequence‑like columns are skipped.
+  - `"split"`: use pre-split columns like `time_trace_0..time_trace_N` as features (recommended for CNN)
+  - `"ignore"`: ignore sequence-like inputs during feature building
+
+  Note: the pipeline intentionally removed the old `"stats"` mode.
+
+- **`split_by`** (optional): column name used for per-slice training loops (e.g. `noise` or `kcross`). If the column exists, `run` trains an overall model and then also trains a model per unique value of `split_by`.
 
 > **Note**: If you load **CSV** files where sequence columns are stored as **strings** (e.g., `"[1.0, 1.1, ...]"`), convert them to real lists first or use Parquet/PKL to preserve list/array types. The summarizer detects Python lists/arrays, not strings.
 
 
-### Model Section 
-- MLP
-  - type: mlp
-  - hidden_layers: list of layer sizes
-  - activation: relu | tanh | logistic | identity
-  - alpha: L2 regularization
-  - Other: solver, learning_rate_init, batch_size, etc.
+### `model` section
+
+#### MLP (PyTorch)
+- `hidden_layers`: list of hidden layer sizes
+- `activation`: `relu` | `tanh` | `sigmoid`
+- `optimizer`: `adam`
+- `lr`, `dropout`, `batch_size`, `epochs`
 
 #### CNN options
 - type: cnn
@@ -150,24 +177,29 @@ mi-race compare
 - Logs: epoch summaries print exactly every 5 epochs with train/test loss and accuracy; a final test summary is printed at the end.
 - Requires: `data.sequence_mode: "split"` and that your `x_cols` include the split sequence range.
 
+#### RNN options
+- Uses raw sequences from `sequence_col` in the original dataframe (not the split columns).
+- `device`: `auto` | `cpu` | `cuda`
+- `max_len`, `pad_value`, `hidden_size`, `num_layers`, `bidirectional`, `batch_size`, `epochs`, `lr`
+
 ### Train Section
 - test_size: test split fraction
 - random_state: reproducibility
-- max_iter: MLP training iterations
 - standardize: adds StandardScaler
 
 ### Output Section
 - dir: artifact folder
 - show_report: print precision/recall/F1 per class
+- ksg_k (optional): neighborhood size for KSG MI estimator when probabilities are available
 
 ---
 
 ## 4. What Happens on `run`
 1. **Load data**.
-2. Resolve **features** (`x_cols`) & **target** (`y_col`). Sequence columns are summarized if `sequence_mode="stats"`.
+2. Resolve **features** (`x_cols`) & **target** (`y_col`).
 3. Split train/test (optionally stratified and/or balanced as configured).
-4. Fit the selected model (MLP or CNN) with optional standardization.
-5. Print a terminal report and **save artifacts**.
+4. Fit the selected model with optional standardization.
+5. Print a terminal summary (boxed Results + boxed Confusion Matrix) and **save artifacts**.
 
 Example terminal output (abridged):
 
@@ -255,6 +287,9 @@ Artifacts saved:
     - `confusion_matrix.csv`
     - `confusion_matrix_info.json` (mutual information and related stats computed from the confusion matrix)
     - `report.txt` (human‑readable summary)
+
+Global detailed report:
+- `outputs/report_detailed_global.txt` (appended to on every run; includes timestamps + config snippets)
 
 Per‑noise training and summaries:
 - If your dataset filenames contain a pattern like `noise_0.01`, a `noise` column is parsed automatically.
