@@ -34,6 +34,8 @@ from .orchestrator_utils import (
     _update_split_accuracy_summary,
 )
 
+from ..cli.ui import render_box
+
 
 
 def run_cmd(args):
@@ -45,6 +47,12 @@ def run_cmd(args):
     with cfg_path.open("r", encoding="utf-8") as f:
         cfg = json.load(f)
 
+    # Output directory (used for pre-run summary and saving artifacts)
+    out_cfg = cfg.get("output", {})
+    base_out = Path(out_cfg.get("dir", "outputs"))
+    dp_ensure_outdir(base_out)
+    _sanitize_summary_models(base_out)
+
     # Data section
     if "data" not in cfg:
         raise SystemExit("[mi-race] Missing 'data' section in config.")
@@ -52,7 +60,30 @@ def run_cmd(args):
 
     # Load dataset
     df = dp_load_df_from_cfg(data_cfg)
-    print(f"[mi-race] Loaded dataset with columns: {df.columns.tolist()}")
+
+    # Pre-run header box
+    selection = getattr(args, "model", None)
+    cmd_box = render_box(
+        [
+            f"Command  run",
+            f"Model    {selection or 'auto'}",
+            f"Config   {args.config}",
+            f"Out      {str(base_out)}",
+        ],
+        title="mi-race",
+        min_width=76,
+    )
+    print(cmd_box)
+
+    ds_box = render_box(
+        [
+            f"Columns  {', '.join(df.columns.tolist())}",
+            f"Rows     {len(df):,}",
+        ],
+        title="Dataset",
+        min_width=76,
+    )
+    print("\n" + ds_box)
 
     # Target
     y_col = data_cfg.get("y_col")
@@ -91,7 +122,15 @@ def run_cmd(args):
     # Build arrays for general stats and counts (from the data actually used for training)
     y = df[y_col].to_numpy()
     full_counts = pd.Series(y).value_counts().sort_index()
-    print(f"[mi-race] Class distribution (full): {full_counts.to_dict()}")
+    label_box = render_box(
+        [
+            f"Label    {y_col}",
+            f"Classes  {sorted(pd.Series(y).dropna().unique().tolist())}",
+        ],
+        title="Labels",
+        min_width=76,
+    )
+    print("\n" + label_box)
 
     # Train settings
     train_cfg = cfg.get("train", {})
@@ -140,24 +179,26 @@ def run_cmd(args):
     if mtype in ("mlp", "cnn", "rf"):
         feature_df, resolved_feature_cols = build_features_from_config(df, cfg)
         summary_cols_text = _summarize_feature_columns(resolved_feature_cols)
-        print(f"[mi-race] Final feature columns (n={len(resolved_feature_cols)}):\n{summary_cols_text}")
+        features_box = render_box(
+            [
+                f"Total features  {len(resolved_feature_cols):,}",
+                *summary_cols_text.splitlines(),
+                f"Saved          {str(base_out / 'processed_features.csv')}",
+            ],
+            title="Features",
+            min_width=76,
+        )
+        print("\n" + features_box)
 
         # Save processed features
-        out_cfg = cfg.get("output", {})
-        base_out = Path(out_cfg.get("dir", "outputs"))
-        dp_ensure_outdir(base_out)
-        # Sanitize legacy summary file once per run
-        _sanitize_summary_models(base_out)
         feature_df_path = base_out / "processed_features.csv"
         feature_df.to_csv(feature_df_path, index=False)
         print(f"[mi-race] Saved processed features to: {feature_df_path}")
     else:
         # For RNN, we keep raw sequences and skip split feature preview/export
-        out_cfg = cfg.get("output", {})
-        base_out = Path(out_cfg.get("dir", "outputs"))
-        dp_ensure_outdir(base_out)
-        _sanitize_summary_models(base_out)
-    print(f"\n[mi-race] ===== Running model: {mtype} =====")
+        pass
+    print("\n" + ("=" * 50) + " Training " + ("=" * 50))
+    print(f"[mi-race] ===== Running model: {mtype} =====")
     if mtype == "mlp":
         # Regular overall training run
         y_test, y_pred, y_proba = run_mlp(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify, full_counts)
@@ -169,7 +210,7 @@ def run_cmd(args):
             except Exception:
                 split_levels = []
             for split_value in split_levels:
-                print(f"\n=== Training for {split_feature} {split_value} ===")
+                print(f"\n=============== Training for {split_feature} {split_value} ===============")
                 mask = df[split_feature] == split_value
                 # Subset features and labels using the same row order
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
@@ -223,7 +264,7 @@ def run_cmd(args):
             except Exception:
                 split_levels = []
             for split_value in split_levels:
-                print(f"\n=== Training for {split_feature} {split_value} (cnn) ===")
+                print(f"\n=============== Training for {split_feature} {split_value} (cnn) ===============")
                 mask = df[split_feature] == split_value
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
@@ -271,7 +312,7 @@ def run_cmd(args):
             except Exception:
                 split_levels = []
             for split_value in split_levels:
-                print(f"\n=== Training for {split_feature} {split_value} (rf) ===")
+                print(f"\n=============== Training for {split_feature} {split_value} (rf) ===============")
                 mask = df[split_feature] == split_value
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
@@ -367,7 +408,7 @@ def run_cmd(args):
             except Exception:
                 split_levels = []
             for split_value in split_levels:
-                print(f"\n=== Training for {split_feature} {split_value} (rnn) ===")
+                print(f"\n=============== Training for {split_feature} {split_value} (rnn) ===============")
                 mask = df[split_feature] == split_value
                 df_sub = df.loc[mask].reset_index(drop=True)
                 y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
@@ -405,6 +446,8 @@ def run_cmd(args):
     else:
         raise SystemExit("[mi-race] Unknown model type. Supported: 'mlp', 'cnn', 'rnn'.")
 
+    print("\n" + ("=" * 50) + " Result " + ("=" * 50))
+
     # Metrics
     acc = accuracy_score(y_test, y_pred)
     n_classes = sorted(pd.Series(y).dropna().unique().tolist())
@@ -426,9 +469,18 @@ def run_cmd(args):
             ksg_bits = ksg_mi_labels_probs(y_test, y_proba, k=k)
     except Exception:
         ksg_bits = None
-    report_txt = build_report_text(mtype, n_classes, acc, macro_f1, cm, info, y_test, y_pred,
-                                   ksg_mi_bits=ksg_bits,
-                                   show_clf_report=show_clf)
+    report_txt = build_report_text(
+        mtype,
+        n_classes,
+        acc,
+        macro_f1,
+        cm,
+        info,
+        y_test,
+        y_pred,
+        ksg_mi_bits=ksg_bits,
+        show_clf_report=show_clf,
+    )
     saved = save_per_model_artifacts(base_out, mtype, cm, info, report_txt)
     # Build extended, time-stamped report and append to global-only file
     end_time = datetime.now()
@@ -454,7 +506,11 @@ def run_cmd(args):
     with global_report_path.open("a", encoding="utf-8") as gf:
         gf.write(detailed_txt)
         gf.write(divider)
+
+    # Print result summary first
     print(report_txt)
+
+    # Footer: keep file paths at the very bottom
     print(f"Saved: {saved['cm']}")
     print(f"Saved: {saved['info']}")
     print(f"Saved: {saved['report']}")

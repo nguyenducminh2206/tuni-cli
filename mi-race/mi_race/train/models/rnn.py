@@ -205,7 +205,16 @@ def run_rnn(
     lr = float(model_cfg.get("lr", 1e-3))
     epochs = int(model_cfg.get("epochs", 5))
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_cfg = str(model_cfg.get("device", "auto")).lower()
+    if device_cfg == "cpu":
+        device = torch.device("cpu")
+    elif device_cfg in ("cuda", "gpu"):
+        if not torch.cuda.is_available():
+            raise SystemExit("[mi-race][rnn] device='cuda' requested but CUDA is not available.")
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[mi-race][rnn] device: {device}")
     model = RNNClassifier(input_size=1, hidden_size=hidden_size, num_layers=num_layers,
                           num_classes=num_classes, bidirectional=bidir, dropout=dropout).to(device)
     if optimizer_name == "sgd":

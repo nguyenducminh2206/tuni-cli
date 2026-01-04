@@ -15,7 +15,7 @@ def _pkg_version() -> str:
     return "0.0.0"
 
 
-def _build_box(lines: List[str], title: Optional[str] = None) -> str:
+def _build_box(lines: List[str], title: Optional[str] = None, *, min_width: int = 34) -> str:
     """Build a Unicode box using box-drawing chars with optional centered title."""
     # Compute inner width based on longest content line
     inner_width = max((len(line) for line in lines), default=0)
@@ -50,19 +50,25 @@ def _print_banner(args: argparse.Namespace) -> None:
     if env_no_logo:
         return
 
-    ascii_header = (
-        "_ __ ___  (_)      _ __ __ _  ___ ___\n"
-        "| '_ ` _ \\ | |_____| '__/ _` |/ __/ _ \\\n"
-        "| | | | | || |_____| | | (_| | (_|  __/\n"
-        "|_| |_| |_||_|     |_|  \\__,_|\\___\\___|\n"
-    )
+    # User-provided ASCII header
+    ascii_header = r"""
+        
+    
+    ███╗   ███╗██╗      ██████╗  █████╗  ██████╗███████╗
+    ████╗ ████║██║      ██╔══██╗██╔══██╗██╔════╝██╔════╝
+    ██╔████╔██║██║█████╗██████╔╝███████║██║     █████╗  
+    ██║╚██╔╝██║██║╚════╝██╔══██╗██╔══██║██║     ██╔══╝  
+    ██║ ╚═╝ ██║██║      ██║  ██║██║  ██║╚██████╗███████╗
+    ╚═╝     ╚═╝╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝
+                                                                                                                                                        
+""".strip("\n")
 
     version_str = _pkg_version()
     lines: List[str] = [
         f"Version  v{version_str}",
         f"Config   {getattr(args, 'config', 'config.json')}",
     ]
-    box = _build_box(lines, title="mi-race")
+    box = _build_box(lines, title="mi-race", min_width=72)
 
     print(ascii_header)
     print(box)

@@ -1,8 +1,8 @@
 {
     "data": {
-        "path": "data_7x7",
-        "x_cols": ["time_trace", "cMax", "cVar"], 
-        "y_col": "dis_to_target",
+        "path": "iris.csv",
+        "x_cols": ["sepal_length", "sepal_width", "petal_length", "petal_width"], 
+        "y_col": "class",
         "sequence_mode": "split",
         "balance": true,
         "split_by": "noise"
@@ -27,7 +27,8 @@
             "fc": 128,
             "epochs": 15,
             "lr": 0.001,
-            "batch_size": 8
+            "batch_size": 8,
+            "device": "auto"
         },
         "rnn": {
             "sequence_col": "time_trace",
@@ -39,7 +40,8 @@
             "bidirectional": true,
             "batch_size": 8,
             "epochs": 5,
-            "lr": 0.001
+            "lr": 0.001,
+            "device": "auto"
         }
     },
     "train": {

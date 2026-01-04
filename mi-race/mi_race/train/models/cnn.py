@@ -141,7 +141,16 @@ def run_cnn(feature_df: pd.DataFrame,
             return self.out(x)
 
     L = X_seq.shape[1]
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device_cfg = str(model_cfg.get("device", "auto")).lower()
+    if device_cfg == "cpu":
+        device = torch.device("cpu")
+    elif device_cfg in ("cuda", "gpu"):
+        if not torch.cuda.is_available():
+            raise SystemExit("[mi-race][cnn] device='cuda' requested but CUDA is not available.")
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[mi-race][cnn] device: {device}")
     model = CNN1D(L).to(device)
     epochs = int(model_cfg.get("epochs", 5))
     # Hardcoded cadence: show tqdm/progress + epoch logs every 5 epochs

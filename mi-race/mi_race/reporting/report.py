@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report
 
+from mi_race.cli.ui import render_box
+
 
 def ensure_outdir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -25,6 +27,37 @@ def cm_table(cm: np.ndarray, labels: List) -> str:
     return "\n".join([header, separator] + rows)
 
 
+def _format_pct(x: float) -> str:
+    return f"{x * 100:.2f}%"
+
+
+def _results_box_lines(acc: float, macro_f1: float, info: dict, ksg_mi_bits: float | None) -> List[str]:
+    mi_bits = float(info.get("I", 0.0))
+    nmi_sqrt = float(info.get("NMI_sqrt", 0.0))
+
+    lines: List[str] = [
+        f"Accuracy: {_format_pct(acc)}",
+        f"Macro F1:  {_format_pct(macro_f1)}",
+        "",
+        f"MI (cm):   {mi_bits:.4f} bits",
+        f"NMI_sqrt:  {nmi_sqrt:.4f}",
+    ]
+
+    if ksg_mi_bits is not None:
+        delta = mi_bits - float(ksg_mi_bits)
+        lines += [
+            f"KSG MI:    {float(ksg_mi_bits):.4f} bits",
+            f"Δ(MI-KSG): {delta:+.4f} bits",
+        ]
+
+    return lines
+
+
+def _boxed_confusion_matrix(cm: np.ndarray, labels: List, *, title: str = "Confusion Matrix (test)") -> str:
+    table_lines = cm_table(cm, labels).splitlines()
+    return render_box(table_lines, title=title, min_width=max(60, max((len(x) for x in table_lines), default=0)))
+
+
 def build_report_text(model_name: str,
                       n_classes: list,
                       acc: float,
@@ -38,11 +71,13 @@ def build_report_text(model_name: str,
     parts = []
     parts.append(f"\n=== Model: {model_name} ===\n")
     parts.append(f"Classes: {n_classes}\n")
-    parts.append("=== Metrics (test) ===\n")
-    parts.append(f"Accuracy: {acc*100:.2f}%\n")
-    parts.append(f"Macro F1: {macro_f1*100:.2f}%\n")
-    parts.append("\n=== Confusion Matrix (test) ===\n")
-    parts.append(cm_table(cm, n_classes) + "\n")
+
+    results_title = f"Results: {model_name} (test)"
+    parts.append(render_box(_results_box_lines(acc, macro_f1, info, ksg_mi_bits), title=results_title, min_width=60))
+    parts.append("\n")
+    parts.append(_boxed_confusion_matrix(cm, n_classes))
+    parts.append("\n")
+
     parts.append("\n=== Mutual Information (from confusion matrix) ===\n")
     parts.append(
         (
