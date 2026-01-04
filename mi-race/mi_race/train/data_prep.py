@@ -7,7 +7,7 @@ from typing import Tuple
 import numpy as np
 import pandas as pd
 
-from ..data.extract_data import build_df
+from ..data_preprocessing.process_data import build_df
 
 
 def ensure_outdir(path: Path) -> None:
@@ -69,25 +69,7 @@ def _safe_array(x):
     return np.array([], dtype=float)
 
 
-def summarize_sequence_col(series: pd.Series, prefix: str) -> pd.DataFrame:
-    """Convert a sequence column into statistical features."""
-    arrays = series.apply(_safe_array)
-    lengths = arrays.apply(len).to_numpy()
-    means = np.array([a.mean() if a.size else np.nan for a in arrays])
-    stds  = np.array([a.std(ddof=0) if a.size else np.nan for a in arrays])
-    mins  = np.array([a.min() if a.size else np.nan for a in arrays])
-    maxs  = np.array([a.max() if a.size else np.nan for a in arrays])
-
-    quantiles = [0.1, 0.25, 0.5, 0.75, 0.9]
-    qs = {f"{prefix}_q{int(q*100)}": np.array([np.quantile(a, q) if a.size else np.nan for a in arrays])
-          for q in quantiles}
-    return pd.DataFrame({ **{
-        f"{prefix}_len": lengths,
-        f"{prefix}_mean": means,
-        f"{prefix}_std": stds,
-        f"{prefix}_min": mins,
-        f"{prefix}_max": maxs,
-    }, **qs })
+ 
 
 
 def split_sequence_col(series: pd.Series, prefix: str) -> pd.DataFrame:
@@ -154,7 +136,8 @@ def build_features_from_config(df: pd.DataFrame, cfg: dict) -> Tuple[pd.DataFram
     if not x_cols:
         raise SystemExit("[mi-race] No feature columns resolved.")
 
-    seq_mode = data_cfg.get("sequence_mode", "stats")  # 'stats' | 'ignore' | 'split'
+    # Only support splitting sequence columns into per-timestep features.
+    seq_mode = data_cfg.get("sequence_mode", "split")  # 'split' | 'ignore'
     new_feature_frames = []
     keep_cols = []
 
@@ -208,17 +191,14 @@ def build_features_from_config(df: pd.DataFrame, cfg: dict) -> Tuple[pd.DataFram
             continue
         s = df[c]
         if s.dtype == object and s.head(5).apply(lambda v: isinstance(v, (list, tuple, np.ndarray))).all():
-            if seq_mode == "stats":
-                stats_df = summarize_sequence_col(s, c)
-                new_feature_frames.append(stats_df)
-            elif seq_mode == "split":
+            if seq_mode == "split":
                 split_df = split_sequence_col(s, c)
                 if not split_df.empty:
                     new_feature_frames.append(split_df)
             elif seq_mode == "ignore":
                 continue
             else:
-                raise SystemExit(f"[mi-race] Unknown sequence_mode '{seq_mode}'. Supported: 'stats', 'split', 'ignore'")
+                raise SystemExit(f"[mi-race] Unknown sequence_mode '{seq_mode}'. Supported: 'split', 'ignore'")
         else:
             keep_cols.append(c)
 

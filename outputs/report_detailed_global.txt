@@ -1,0 +1,468 @@
+Starting time: 8 Dec 2025, 1:35am
+Elapsed time: 169 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": "auto"
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 43.35%
+Macro F1: 43.31%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   944     6     3     1     2     4
+  1 |    10   574   129    84    66    97
+  2 |     2   122   264   202   171   199
+  3 |     0    94   195   234   187   250
+  4 |     1    82   195   229   206   247
+  5 |     3    83   169   215   215   275
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5816 bits  |  Hjoint: 4.4232 bits
+I(true;pred): 0.7434 bits  |  NMI_sqrt: 0.2878  |  NMI_min: 0.2880  |  NMI_max: 0.2876
+H(true|pred): 1.8415 bits  |  H(pred|true): 1.8382 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9833    0.9833    0.9833       960
+           1     0.5973    0.5979    0.5976       960
+           2     0.2764    0.2750    0.2757       960
+           3     0.2425    0.2437    0.2431       960
+           4     0.2432    0.2146    0.2280       960
+           5     0.2565    0.2865    0.2707       960
+
+    accuracy                         0.4335      5760
+   macro avg     0.4332    0.4335    0.4331      5760
+weighted avg     0.4332    0.4335    0.4331      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 8 Dec 2025, 1:40am
+Elapsed time: 157 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"rf": {}
+
+=== Model: rf ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 46.75%
+Macro F1: 45.42%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   957     3     0     0     0     0
+  1 |    22   708    89    58    49    34
+  2 |    13   170   336   157   147   137
+  3 |    12   117   187   215   202   227
+  4 |     6   138   174   211   208   223
+  5 |     8   113   158   211   201   269
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5691 bits  |  Hjoint: 4.3761 bits
+I(true;pred): 0.7780 bits  |  NMI_sqrt: 0.3019  |  NMI_min: 0.3028  |  NMI_max: 0.3010
+H(true|pred): 1.8070 bits  |  H(pred|true): 1.7911 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9401    0.9969    0.9676       960
+           1     0.5669    0.7375    0.6410       960
+           2     0.3559    0.3500    0.3529       960
+           3     0.2523    0.2240    0.2373       960
+           4     0.2577    0.2167    0.2354       960
+           5     0.3022    0.2802    0.2908       960
+
+    accuracy                         0.4675      5760
+   macro avg     0.4459    0.4675    0.4542      5760
+weighted avg     0.4459    0.4675    0.4542      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 8 Dec 2025, 1:44am
+Elapsed time: 192 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": "auto"
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 43.35%
+Macro F1: 43.31%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   944     6     3     1     2     4
+  1 |    10   574   129    84    66    97
+  2 |     2   122   264   202   171   199
+  3 |     0    94   195   234   187   250
+  4 |     1    82   195   229   206   247
+  5 |     3    83   169   215   215   275
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5816 bits  |  Hjoint: 4.4232 bits
+I(true;pred): 0.7434 bits  |  NMI_sqrt: 0.2878  |  NMI_min: 0.2880  |  NMI_max: 0.2876
+H(true|pred): 1.8415 bits  |  H(pred|true): 1.8382 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9833    0.9833    0.9833       960
+           1     0.5973    0.5979    0.5976       960
+           2     0.2764    0.2750    0.2757       960
+           3     0.2425    0.2437    0.2431       960
+           4     0.2432    0.2146    0.2280       960
+           5     0.2565    0.2865    0.2707       960
+
+    accuracy                         0.4335      5760
+   macro avg     0.4332    0.4335    0.4331      5760
+weighted avg     0.4332    0.4335    0.4331      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 8 Dec 2025, 2:02am
+Elapsed time: 204 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": "auto"
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 43.35%
+Macro F1: 43.31%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   944     6     3     1     2     4
+  1 |    10   574   129    84    66    97
+  2 |     2   122   264   202   171   199
+  3 |     0    94   195   234   187   250
+  4 |     1    82   195   229   206   247
+  5 |     3    83   169   215   215   275
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5816 bits  |  Hjoint: 4.4232 bits
+I(true;pred): 0.7434 bits  |  NMI_sqrt: 0.2878  |  NMI_min: 0.2880  |  NMI_max: 0.2876
+H(true|pred): 1.8415 bits  |  H(pred|true): 1.8382 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9833    0.9833    0.9833       960
+           1     0.5973    0.5979    0.5976       960
+           2     0.2764    0.2750    0.2757       960
+           3     0.2425    0.2437    0.2431       960
+           4     0.2432    0.2146    0.2280       960
+           5     0.2565    0.2865    0.2707       960
+
+    accuracy                         0.4335      5760
+   macro avg     0.4332    0.4335    0.4331      5760
+weighted avg     0.4332    0.4335    0.4331      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 4 Jan 2026, 3:35pm
+Elapsed time: 239 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": "auto"
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 43.35%
+Macro F1: 43.31%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   944     6     3     1     2     4
+  1 |    10   574   129    84    66    97
+  2 |     2   122   264   202   171   199
+  3 |     0    94   195   234   187   250
+  4 |     1    82   195   229   206   247
+  5 |     3    83   169   215   215   275
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5816 bits  |  Hjoint: 4.4232 bits
+I(true;pred): 0.7434 bits  |  NMI_sqrt: 0.2878  |  NMI_min: 0.2880  |  NMI_max: 0.2876
+H(true|pred): 1.8415 bits  |  H(pred|true): 1.8382 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9833    0.9833    0.9833       960
+           1     0.5973    0.5979    0.5976       960
+           2     0.2764    0.2750    0.2757       960
+           3     0.2425    0.2437    0.2431       960
+           4     0.2432    0.2146    0.2280       960
+           5     0.2565    0.2865    0.2707       960
+
+    accuracy                         0.4335      5760
+   macro avg     0.4332    0.4335    0.4331      5760
+weighted avg     0.4332    0.4335    0.4331      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 4 Jan 2026, 5:22pm
+Elapsed time: 109 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 46.41%
+Macro F1: 46.25%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   951     5     0     1     2     1
+  1 |     5   625   103    81    81    65
+  2 |     1   129   320   161   203   146
+  3 |     0    87   187   219   247   220
+  4 |     1    88   151   197   268   255
+  5 |     2    75   156   177   260   290
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5810 bits  |  Hjoint: 4.3673 bits
+I(true;pred): 0.7987 bits  |  NMI_sqrt: 0.3092  |  NMI_min: 0.3094  |  NMI_max: 0.3090
+H(true|pred): 1.7863 bits  |  H(pred|true): 1.7823 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9906    0.9906    0.9906       960
+           1     0.6194    0.6510    0.6348       960
+           2     0.3490    0.3333    0.3410       960
+           3     0.2620    0.2281    0.2439       960
+           4     0.2526    0.2792    0.2652       960
+           5     0.2968    0.3021    0.2994       960
+
+    accuracy                         0.4641      5760
+   macro avg     0.4617    0.4641    0.4625      5760
+weighted avg     0.4617    0.4641    0.4625      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 4 Jan 2026, 5:30pm
+Elapsed time: 93 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 45.24%
+Macro F1: 44.65%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   945    10     4     0     1     0
+  1 |     4   659    98    65    78    56
+  2 |     1   149   323   154   218   115
+  3 |     1   113   195   222   278   151
+  4 |     2   118   179   232   255   174
+  5 |     5    91   165   226   271   202
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5681 bits  |  Hjoint: 4.3751 bits
+I(true;pred): 0.7780 bits  |  NMI_sqrt: 0.3019  |  NMI_min: 0.3029  |  NMI_max: 0.3010
+H(true|pred): 1.8070 bits  |  H(pred|true): 1.7901 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9864    0.9844    0.9854       960
+           1     0.5781    0.6865    0.6276       960
+           2     0.3351    0.3365    0.3358       960
+           3     0.2469    0.2313    0.2388       960
+           4     0.2316    0.2656    0.2475       960
+           5     0.2894    0.2104    0.2437       960
+
+    accuracy                         0.4524      5760
+   macro avg     0.4446    0.4524    0.4465      5760
+weighted avg     0.4446    0.4524    0.4465      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 4 Jan 2026, 5:33pm
+Elapsed time: 86 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace",
+        "cMax",
+        "cVar"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 45.24%
+Macro F1: 44.65%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   945    10     4     0     1     0
+  1 |     4   659    98    65    78    56
+  2 |     1   149   323   154   218   115
+  3 |     1   113   195   222   278   151
+  4 |     2   118   179   232   255   174
+  5 |     5    91   165   226   271   202
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5681 bits  |  Hjoint: 4.3751 bits
+I(true;pred): 0.7780 bits  |  NMI_sqrt: 0.3019  |  NMI_min: 0.3029  |  NMI_max: 0.3010
+H(true|pred): 1.8070 bits  |  H(pred|true): 1.7901 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9864    0.9844    0.9854       960
+           1     0.5781    0.6865    0.6276       960
+           2     0.3351    0.3365    0.3358       960
+           3     0.2469    0.2313    0.2388       960
+           4     0.2316    0.2656    0.2475       960
+           5     0.2894    0.2104    0.2437       960
+
+    accuracy                         0.4524      5760
+   macro avg     0.4446    0.4524    0.4465      5760
+weighted avg     0.4446    0.4524    0.4465      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+

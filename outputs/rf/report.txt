@@ -1,0 +1,36 @@
+
+=== Model: rf ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 46.75%
+Macro F1: 45.42%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   957     3     0     0     0     0
+  1 |    22   708    89    58    49    34
+  2 |    13   170   336   157   147   137
+  3 |    12   117   187   215   202   227
+  4 |     6   138   174   211   208   223
+  5 |     8   113   158   211   201   269
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5691 bits  |  Hjoint: 4.3761 bits
+I(true;pred): 0.7780 bits  |  NMI_sqrt: 0.3019  |  NMI_min: 0.3028  |  NMI_max: 0.3010
+H(true|pred): 1.8070 bits  |  H(pred|true): 1.7911 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9401    0.9969    0.9676       960
+           1     0.5669    0.7375    0.6410       960
+           2     0.3559    0.3500    0.3529       960
+           3     0.2523    0.2240    0.2373       960
+           4     0.2577    0.2167    0.2354       960
+           5     0.3022    0.2802    0.2908       960
+
+    accuracy                         0.4675      5760
+   macro avg     0.4459    0.4675    0.4542      5760
+weighted avg     0.4459    0.4675    0.4542      5760
+

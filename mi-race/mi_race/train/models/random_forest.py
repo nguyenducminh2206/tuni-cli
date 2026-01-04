@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Tuple, Optional
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -15,7 +15,7 @@ def run_random_forest(
     standardize: bool,  # Ignored for RF; kept for API parity
     random_state: int,
     stratify,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """Train a RandomForest classifier and return (y_test, y_pred).
 
     Notes:
@@ -75,4 +75,9 @@ def run_random_forest(
         print(f"[mi-race][rf] Model learned classes: {learned_classes}")
 
     y_pred = clf.predict(X_test)
-    return y_test, y_pred
+    # RF supports predict_proba when criterion is classification
+    try:
+        y_proba = clf.predict_proba(X_test)
+    except Exception:
+        y_proba = None
+    return y_test, y_pred, y_proba

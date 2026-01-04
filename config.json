@@ -4,7 +4,8 @@
         "x_cols": ["time_trace", "cMax", "cVar"], 
         "y_col": "dis_to_target",
         "sequence_mode": "split",
-        "balance": true
+        "balance": true,
+        "split_by": "noise"
     },
 
     "model": {
@@ -12,10 +13,11 @@
             "type": "mlp",
             "hidden_layers": [128, 128],
             "activation": "relu",
-            "solver": "adam",
-            "learning_rate_init": 0.001,
-            "alpha": 0.0001,
-            "batch_size": "auto"
+            "optimizer": "adam",
+            "lr": 0.001,
+            "dropout": 0.0,
+            "batch_size": 64,
+            "epochs": 15
         },
         "cnn": {
             "type": "cnn",
@@ -43,7 +45,6 @@
     "train": {
         "test_size": 0.2,
         "random_state": 42,
-        "max_iter": 500,
         "standardize": true
     },
     "output": {

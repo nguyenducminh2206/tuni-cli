@@ -14,13 +14,19 @@ import pandas as pd
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 
 from ..analysis import info_from_confusion_matrix
+from ..analysis.metrics import ksg_mi_labels_probs
 from .data_prep import (
     load_df_from_cfg as dp_load_df_from_cfg,
     build_features_from_config,
     ensure_outdir as dp_ensure_outdir,
 )
 from .models.mlp import run_mlp
-from ..reporting.report import build_report_text, save_per_model_artifacts
+from datetime import datetime
+from ..reporting.report import (
+    build_report_text,
+    save_per_model_artifacts,
+    build_detailed_run_report,
+)
 from .orchestrator_utils import (
     _summarize_feature_columns,
     _update_accuracy_summary,
@@ -31,6 +37,7 @@ from .orchestrator_utils import (
 
 
 def run_cmd(args):
+    start_time = datetime.now()
     # Load config
     cfg_path = Path(args.config)
     if not cfg_path.exists():
@@ -153,7 +160,7 @@ def run_cmd(args):
     print(f"\n[mi-race] ===== Running model: {mtype} =====")
     if mtype == "mlp":
         # Regular overall training run
-        y_test, y_pred = run_mlp(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify, full_counts)
+        y_test, y_pred, y_proba = run_mlp(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify, full_counts)
 
         # Additionally: train per-split feature (e.g., noise or kcross) if that column exists
         if split_feature in df.columns:
@@ -172,8 +179,8 @@ def run_cmd(args):
                     continue
                 sub_counts = pd.Series(y_sub).value_counts().sort_index()
                 sub_stratify = y_sub if train_cfg.get("stratify", True) else None
-                epochs_like = int(train_cfg.get("max_iter", 200))  # use max_iter as epochs proxy for MLP
-                y_t_sub, y_p_sub = run_mlp(
+                epochs_like = int(selected_cfg.get("epochs", train_cfg.get("epochs", 15)))
+                y_t_sub, y_p_sub, _ = run_mlp(
                     feature_df_sub,
                     y_sub,
                     train_cfg,
@@ -207,6 +214,7 @@ def run_cmd(args):
         # Lazy import to avoid requiring torch unless needed
         from .models.cnn import run_cnn
         y_test, y_pred = run_cnn(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
+        y_proba = None
 
         # Per-split-feature loop for CNN as well
         if split_feature in df.columns:
@@ -254,7 +262,7 @@ def run_cmd(args):
                 _update_split_accuracy_summary(base_out, "cnn", split_feature, split_value, float(acc_sub))
     elif mtype == "rf":
         from .models.random_forest import run_random_forest
-        y_test, y_pred = run_random_forest(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
+        y_test, y_pred, y_proba = run_random_forest(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
 
         # Per-split-feature loop for RF
         if split_feature in df.columns:
@@ -351,6 +359,7 @@ def run_cmd(args):
         except Exception as e:
             print(f"[mi-race][rnn][WARN] Failed to export processed RNN features: {e}")
         y_test, y_pred = run_rnn(df, y, train_cfg, selected_cfg, random_state, stratify)
+        y_proba = None
         # Per-split-feature loop for RNN as well
         if split_feature in df.columns:
             try:
@@ -408,13 +417,48 @@ def run_cmd(args):
     macro_f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
 
     # Report
+    show_clf = cfg.get("output", {}).get("show_report", True)
+    # Optional KSG MI using predicted probabilities when available
+    ksg_bits = None
+    try:
+        if 'y_proba' in locals() and y_proba is not None:
+            k = int(cfg.get("output", {}).get("ksg_k", 5))
+            ksg_bits = ksg_mi_labels_probs(y_test, y_proba, k=k)
+    except Exception:
+        ksg_bits = None
     report_txt = build_report_text(mtype, n_classes, acc, macro_f1, cm, info, y_test, y_pred,
-                                   show_clf_report=cfg.get("output", {}).get("show_report", True))
+                                   ksg_mi_bits=ksg_bits,
+                                   show_clf_report=show_clf)
     saved = save_per_model_artifacts(base_out, mtype, cm, info, report_txt)
+    # Build extended, time-stamped report and append to global-only file
+    end_time = datetime.now()
+    detailed_txt = build_detailed_run_report(
+        start_time,
+        end_time,
+        cfg.get("data", {}),
+        selected_cfg if isinstance(selected_cfg, dict) else {},
+        mtype,
+        n_classes,
+        acc,
+        macro_f1,
+        cm,
+        info,
+        y_test,
+        y_pred,
+        show_clf_report=show_clf,
+    )
+    # Append to a global report aggregating all runs across models
+    global_report_path = base_out / "report_detailed_global.txt"
+    # Separate entries with divider lines for readability
+    divider = "\n" + ("-" * 74) + "\n" + ("-" * 74) + "\n\n"
+    with global_report_path.open("a", encoding="utf-8") as gf:
+        gf.write(detailed_txt)
+        gf.write(divider)
     print(report_txt)
     print(f"Saved: {saved['cm']}")
     print(f"Saved: {saved['info']}")
     print(f"Saved: {saved['report']}")
+    print(f"Appended to global report: {global_report_path}")
 
     # Update simple accuracy summary across runs
     summary_path = _update_accuracy_summary(base_out, mtype, float(acc))

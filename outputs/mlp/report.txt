@@ -1,0 +1,39 @@
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+=== Metrics (test) ===
+Accuracy: 45.24%
+Macro F1: 44.65%
+
+=== Confusion Matrix (test) ===
+          0     1     2     3     4     5
+    ------------------------------------
+  0 |   945    10     4     0     1     0
+  1 |     4   659    98    65    78    56
+  2 |     1   149   323   154   218   115
+  3 |     1   113   195   222   278   151
+  4 |     2   118   179   232   255   174
+  5 |     5    91   165   226   271   202
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5681 bits  |  Hjoint: 4.3751 bits
+I(true;pred): 0.7780 bits  |  NMI_sqrt: 0.3019  |  NMI_min: 0.3029  |  NMI_max: 0.3010
+H(true|pred): 1.8070 bits  |  H(pred|true): 1.7901 bits
+
+=== KSG MI (labels;probs) ===
+KSG I(true;probs): 0.7433 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9864    0.9844    0.9854       960
+           1     0.5781    0.6865    0.6276       960
+           2     0.3351    0.3365    0.3358       960
+           3     0.2469    0.2313    0.2388       960
+           4     0.2316    0.2656    0.2475       960
+           5     0.2894    0.2104    0.2437       960
+
+    accuracy                         0.4524      5760
+   macro avg     0.4446    0.4524    0.4465      5760
+weighted avg     0.4446    0.4524    0.4465      5760
+

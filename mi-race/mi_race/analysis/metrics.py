@@ -8,6 +8,8 @@ from __future__ import annotations
 from typing import Literal, Optional, Dict, Any
 
 import numpy as np
+from scipy.special import digamma
+from sklearn.neighbors import NearestNeighbors
 
 
 def _safe_probs(counts: np.ndarray) -> np.ndarray:
@@ -117,13 +119,52 @@ def info_from_confusion_matrix(cm: np.ndarray, labels: Optional[list] = None) ->
         "H_true": H_true,
         "H_pred": H_pred,
         "H_joint": H_joint,
-    "I": mi,
+        "I": mi,
         "H_true_given_pred": H_true_given_pred,
         "H_pred_given_true": H_pred_given_true,
-    "NMI_sqrt": _normalized_mi(mi, H_true, H_pred, mode="sqrt"),
-    "NMI_min": _normalized_mi(mi, H_true, H_pred, mode="min"),
-    "NMI_max": _normalized_mi(mi, H_true, H_pred, mode="max"),
+        "NMI_sqrt": _normalized_mi(mi, H_true, H_pred, mode="sqrt"),
+        "NMI_min": _normalized_mi(mi, H_true, H_pred, mode="min"),
+        "NMI_max": _normalized_mi(mi, H_true, H_pred, mode="max"),
         "p_true": p_true.tolist(),
         "p_pred": p_pred.tolist(),
         "P": P.tolist(),
     }
+
+
+def ksg_mi_labels_probs(y: np.ndarray, probs: np.ndarray, k: int = 5) -> float:
+    """Kraskov MI between discrete labels and continuous probabilities.
+
+    Notes:
+    - KSG is designed for continuous variables; we embed integer labels as 1D continuous values.
+    - We use L_inf (Chebyshev) norm for neighbor radius, following the KSG-1 variant.
+    - Returns MI in bits.
+    """
+    y = np.asarray(y).reshape(-1, 1).astype(float)
+    probs = np.asarray(probs, dtype=float)
+    if y.shape[0] != probs.shape[0]:
+        raise ValueError("y and probs must have the same number of samples")
+    N = y.shape[0]
+    if N <= k:
+        return 0.0
+
+    # Joint space
+    X = np.concatenate([y, probs], axis=1)
+    nn_joint = NearestNeighbors(n_neighbors=k + 1, metric="chebyshev").fit(X)
+    d_joint, _ = nn_joint.kneighbors(X)
+    eps = d_joint[:, k]
+
+    # Marginals
+    nn_x = NearestNeighbors(n_neighbors=N, metric="chebyshev").fit(y)
+    nn_y = NearestNeighbors(n_neighbors=N, metric="chebyshev").fit(probs)
+    d_x, _ = nn_x.kneighbors(y)
+    d_y, _ = nn_y.kneighbors(probs)
+
+    nx = np.empty(N, dtype=int)
+    ny = np.empty(N, dtype=int)
+    for i in range(N):
+        nx[i] = int(np.sum(d_x[i, 1:] <= eps[i]))
+        ny[i] = int(np.sum(d_y[i, 1:] <= eps[i]))
+
+    mi_nats = digamma(k) - np.mean(digamma(nx + 1) + digamma(ny + 1)) + digamma(N)
+    mi_bits = float(mi_nats / np.log(2))
+    return max(mi_bits, 0.0)
