@@ -965,3 +965,236 @@ weighted avg     0.9687    0.9655    0.9654        29
 --------------------------------------------------------------------------
 --------------------------------------------------------------------------
 
+Starting time: 4 Jan 2026, 9:23pm
+Elapsed time: 65 second
+
+"data": {
+    "path": "data_7x7",
+    "x_cols": [
+        "time_trace_0:time_trace_500"
+    ],
+    "y_col": "dis_to_target",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2, 3, 4, 5]
+╭─────────────────── Results: mlp (test) ────────────────────╮
+│ Accuracy: 45.33%                                           │
+│ Macro F1:  44.83%                                          │
+│                                                            │
+│ MI (cm):   0.8034 bits                                     │
+│ NMI_sqrt:  0.3137                                          │
+╰────────────────────────────────────────────────────────────╯
+╭───────────────── Confusion Matrix (test) ──────────────────╮
+│           0     1     2     3     4     5                  │
+│     ------------------------------------                   │
+│   0 |   955     2     1     0     0     2                  │
+│   1 |     4   602   179    54    48    73                  │
+│   2 |     0   101   419   121   161   158                  │
+│   3 |     1    73   310   153   188   235                  │
+│   4 |     2    79   293   154   198   234                  │
+│   5 |     0    63   255   158   200   284                  │
+╰────────────────────────────────────────────────────────────╯
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.5850 bits  |  H(pred): 2.5380 bits  |  Hjoint: 4.3195 bits
+I(true;pred): 0.8034 bits  |  NMI_sqrt: 0.3137  |  NMI_min: 0.3165  |  NMI_max: 0.3108
+H(true|pred): 1.7816 bits  |  H(pred|true): 1.7346 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     0.9927    0.9948    0.9938       960
+           1     0.6543    0.6271    0.6404       960
+           2     0.2876    0.4365    0.3467       960
+           3     0.2391    0.1594    0.1913       960
+           4     0.2491    0.2062    0.2256       960
+           5     0.2880    0.2958    0.2919       960
+
+    accuracy                         0.4533      5760
+   macro avg     0.4518    0.4533    0.4483      5760
+weighted avg     0.4518    0.4533    0.4483      5760
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 5 Jan 2026, 9:14am
+Elapsed time: 15 second
+
+"data": {
+    "path": "iris.csv",
+    "x_cols": [
+        "sepal_length",
+        "sepal_width",
+        "petal_length",
+        "petal_width"
+    ],
+    "y_col": "class",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: [0, 1, 2]
+╭─────────────────── Results: mlp (test) ────────────────────╮
+│ Accuracy: 96.55%                                           │
+│ Macro F1:  96.66%                                          │
+│                                                            │
+│ MI (cm):   1.4165 bits                                     │
+│ NMI_sqrt:  0.8961                                          │
+╰────────────────────────────────────────────────────────────╯
+╭───────────────── Confusion Matrix (test) ──────────────────╮
+│           0     1     2                                    │
+│     ------------------                                     │
+│   0 |     9     0     0                                    │
+│   1 |     0     9     1                                    │
+│   2 |     0     0    10                                    │
+╰────────────────────────────────────────────────────────────╯
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 1.5832 bits  |  H(pred): 1.5782 bits  |  Hjoint: 1.7449 bits
+I(true;pred): 1.4165 bits  |  NMI_sqrt: 0.8961  |  NMI_min: 0.8975  |  NMI_max: 0.8947
+H(true|pred): 0.1667 bits  |  H(pred|true): 0.1617 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+           0     1.0000    1.0000    1.0000         9
+           1     1.0000    0.9000    0.9474        10
+           2     0.9091    1.0000    0.9524        10
+
+    accuracy                         0.9655        29
+   macro avg     0.9697    0.9667    0.9666        29
+weighted avg     0.9687    0.9655    0.9654        29
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 21 Jan 2026, 4:44pm
+Elapsed time: 151 second
+
+"data": {
+    "path": "OU/OU_concat.csv",
+    "x_cols": "time_point_1:time_point_11",
+    "y_col": "mu",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"cnn": {
+    "batch_size": 8,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: cnn ===
+Classes: ['0.0', '0.5', '1.0', '1.5']
+╭─────────────────── Results: cnn (test) ────────────────────╮
+│ Accuracy: 65.12%                                           │
+│ Macro F1:  64.60%                                          │
+│                                                            │
+│ MI (cm):   0.5969 bits                                     │
+│ NMI_sqrt:  0.2997                                          │
+╰────────────────────────────────────────────────────────────╯
+╭───────────────── Confusion Matrix (test) ──────────────────╮
+│         0.0   0.5   1.0   1.5                              │
+│     ------------------------                               │
+│ 0.0 |   603   114    45    38                              │
+│ 0.5 |   187   427   101    85                              │
+│ 1.0 |    65   103   426   206                              │
+│ 1.5 |    31    33   108   628                              │
+╰────────────────────────────────────────────────────────────╯
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.0000 bits  |  H(pred): 1.9827 bits  |  Hjoint: 3.3858 bits
+I(true;pred): 0.5969 bits  |  NMI_sqrt: 0.2997  |  NMI_min: 0.3010  |  NMI_max: 0.2984
+H(true|pred): 1.4031 bits  |  H(pred|true): 1.3858 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+         0.0     0.6806    0.7538    0.7153       800
+         0.5     0.6307    0.5337    0.5782       800
+         1.0     0.6265    0.5325    0.5757       800
+         1.5     0.6562    0.7850    0.7149       800
+
+    accuracy                         0.6512      3200
+   macro avg     0.6485    0.6512    0.6460      3200
+weighted avg     0.6485    0.6512    0.6460      3200
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 21 Jan 2026, 4:50pm
+Elapsed time: 15 second
+
+"data": {
+    "path": "OU/OU_concat.csv",
+    "x_cols": "time_point_1:time_point_11",
+    "y_col": "mu",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: ['0.0', '0.5', '1.0', '1.5']
+╭─────────────────── Results: mlp (test) ────────────────────╮
+│ Accuracy: 64.81%                                           │
+│ Macro F1:  64.22%                                          │
+│                                                            │
+│ MI (cm):   0.5963 bits                                     │
+│ NMI_sqrt:  0.2996                                          │
+╰────────────────────────────────────────────────────────────╯
+╭───────────────── Confusion Matrix (test) ──────────────────╮
+│         0.0   0.5   1.0   1.5                              │
+│     ------------------------                               │
+│ 0.0 |   600   128    40    32                              │
+│ 0.5 |   188   439    99    74                              │
+│ 1.0 |    69   114   400   217                              │
+│ 1.5 |    29    46    90   635                              │
+╰────────────────────────────────────────────────────────────╯
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.0000 bits  |  H(pred): 1.9809 bits  |  Hjoint: 3.3846 bits
+I(true;pred): 0.5963 bits  |  NMI_sqrt: 0.2996  |  NMI_min: 0.3010  |  NMI_max: 0.2981
+H(true|pred): 1.4037 bits  |  H(pred|true): 1.3846 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+         0.0     0.6772    0.7500    0.7117       800
+         0.5     0.6039    0.5487    0.5750       800
+         1.0     0.6359    0.5000    0.5598       800
+         1.5     0.6628    0.7937    0.7224       800
+
+    accuracy                         0.6481      3200
+   macro avg     0.6450    0.6481    0.6422      3200
+weighted avg     0.6450    0.6481    0.6422      3200
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+

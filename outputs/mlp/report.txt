@@ -1,39 +1,41 @@
 
 === Model: mlp ===
-Classes: [0, 1, 2]
+Classes: ['0.0', '0.5', '1.0', '1.5']
 ╭─────────────────── Results: mlp (test) ────────────────────╮
-│ Accuracy: 96.55%                                           │
-│ Macro F1:  96.66%                                          │
+│ Accuracy: 64.81%                                           │
+│ Macro F1:  64.22%                                          │
 │                                                            │
-│ MI (cm):   1.4165 bits                                     │
-│ NMI_sqrt:  0.8961                                          │
-│ KSG MI:    1.2781 bits                                     │
-│ Δ(MI-KSG): +0.1384 bits                                    │
+│ MI (cm):   0.5963 bits                                     │
+│ NMI_sqrt:  0.2996                                          │
+│ KSG MI:    0.7184 bits                                     │
+│ Δ(MI-KSG): -0.1221 bits                                    │
 ╰────────────────────────────────────────────────────────────╯
 ╭───────────────── Confusion Matrix (test) ──────────────────╮
-│           0     1     2                                    │
-│     ------------------                                     │
-│   0 |     9     0     0                                    │
-│   1 |     0     9     1                                    │
-│   2 |     0     0    10                                    │
+│         0.0   0.5   1.0   1.5                              │
+│     ------------------------                               │
+│ 0.0 |   600   128    40    32                              │
+│ 0.5 |   188   439    99    74                              │
+│ 1.0 |    69   114   400   217                              │
+│ 1.5 |    29    46    90   635                              │
 ╰────────────────────────────────────────────────────────────╯
 
 === Mutual Information (from confusion matrix) ===
-H(true): 1.5832 bits  |  H(pred): 1.5782 bits  |  Hjoint: 1.7449 bits
-I(true;pred): 1.4165 bits  |  NMI_sqrt: 0.8961  |  NMI_min: 0.8975  |  NMI_max: 0.8947
-H(true|pred): 0.1667 bits  |  H(pred|true): 0.1617 bits
+H(true): 2.0000 bits  |  H(pred): 1.9809 bits  |  Hjoint: 3.3846 bits
+I(true;pred): 0.5963 bits  |  NMI_sqrt: 0.2996  |  NMI_min: 0.3010  |  NMI_max: 0.2981
+H(true|pred): 1.4037 bits  |  H(pred|true): 1.3846 bits
 
 === KSG MI (labels;probs) ===
-KSG I(true;probs): 1.2781 bits
+KSG I(true;probs): 0.7184 bits
 
 === Classification Report (test) ===
               precision    recall  f1-score   support
 
-           0     1.0000    1.0000    1.0000         9
-           1     1.0000    0.9000    0.9474        10
-           2     0.9091    1.0000    0.9524        10
+         0.0     0.6772    0.7500    0.7117       800
+         0.5     0.6039    0.5487    0.5750       800
+         1.0     0.6359    0.5000    0.5598       800
+         1.5     0.6628    0.7937    0.7224       800
 
-    accuracy                         0.9655        29
-   macro avg     0.9697    0.9667    0.9666        29
-weighted avg     0.9687    0.9655    0.9654        29
+    accuracy                         0.6481      3200
+   macro avg     0.6450    0.6481    0.6422      3200
+weighted avg     0.6450    0.6481    0.6422      3200
 

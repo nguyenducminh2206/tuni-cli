@@ -172,17 +172,27 @@ def build_features_from_config(df: pd.DataFrame, cfg: dict) -> Tuple[pd.DataFram
             if base_l != base_r:
                 raise ValueError("Range endpoints must refer to the same sequence column")
             col_name = base_l
-            if col_name not in df.columns:
-                raise ValueError(f"sequence column '{col_name}' not found in dataset")
             if start_idx > end_idx:
                 raise ValueError("Start index must be <= end index")
 
-            series = df[col_name]
-            range_df = extract_sequence_range(series, col_name, start_idx, end_idx)
-            if not range_df.empty:
-                new_feature_frames.append(range_df)
+            # Two supported cases:
+            # 1) A base sequence column exists (e.g., 'time_point' is a list/ndarray per row)
+            # 2) The dataset already has split columns (e.g., 'time_point_1'...'time_point_11')
+            if col_name in df.columns:
+                series = df[col_name]
+                range_df = extract_sequence_range(series, col_name, start_idx, end_idx)
+                if not range_df.empty:
+                    new_feature_frames.append(range_df)
             else:
-                pass
+                requested_cols = [f"{col_name}_{i}" for i in range(start_idx, end_idx + 1)]
+                missing_cols = [c for c in requested_cols if c not in df.columns]
+                if missing_cols:
+                    available = [c for c in df.columns if c.startswith(f"{col_name}_")]
+                    hint = f" Available split cols: {available[:25]}" + (" ..." if len(available) > 25 else "")
+                    raise ValueError(
+                        f"sequence column '{col_name}' not found; also missing split columns: {missing_cols}.{hint}"
+                    )
+                new_feature_frames.append(df[requested_cols].copy())
         except (ValueError, IndexError) as e:
             raise SystemExit(f"[mi-race] Invalid sequence range specification '{range_spec}': {e}")
 

@@ -105,8 +105,9 @@ def run_mlp(
     y_idx = np.array([label_to_idx[v] for v in y], dtype=np.int64)
 
     test_size = float(train_cfg.get("test_size", 0.2))
+    stratify_idx = y_idx if stratify is not None else None
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y_idx, test_size=test_size, random_state=random_state, stratify=stratify
+        X, y_idx, test_size=test_size, random_state=random_state, stratify=stratify_idx
     )
 
     # Optional standardization (fit on train only)
@@ -117,14 +118,22 @@ def run_mlp(
 
     train_counts = pd.Series(y_train).value_counts().sort_index()
     test_counts = pd.Series(y_test).value_counts().sort_index()
-    print(f"[mi-race][mlp] Total rows: {feature_df.shape[0]}")
-    print(f"[mi-race][mlp] Class distribution (train): {train_counts.to_dict()}")
-    print(f"[mi-race][mlp] Class distribution (test):  {test_counts.to_dict()}")
 
-    # Warn if some classes missing in training set
-    missing_classes = [c for c in full_counts.index if c not in train_counts.index]
-    if missing_classes:
-        print(f"[mi-race][WARN][mlp] Classes missing from training set: {missing_classes} -> cannot be predicted.")
+    def _counts_to_label_dict(counts: pd.Series) -> dict:
+        out: dict = {}
+        for idx, cnt in counts.items():
+            out[idx_to_label.get(int(idx), idx)] = int(cnt)
+        return out
+    print(f"[mi-race][mlp] Total rows: {feature_df.shape[0]}")
+    print(f"[mi-race][mlp] Class distribution (train): {_counts_to_label_dict(train_counts)}")
+    print(f"[mi-race][mlp] Class distribution (test):  {_counts_to_label_dict(test_counts)}")
+
+    # Warn if some classes (from the full dataset) are missing in the training split
+    full_idx = [label_to_idx[v] for v in full_counts.index if v in label_to_idx]
+    missing_idx = [i for i in full_idx if i not in set(train_counts.index.tolist())]
+    if missing_idx:
+        missing_labels = [idx_to_label[int(i)] for i in missing_idx]
+        print(f"[mi-race][WARN][mlp] Classes missing from training set: {missing_labels} -> cannot be predicted.")
 
     hidden_layers = list(model_cfg.get("hidden_layers", [128, 128]))
     activation = str(model_cfg.get("activation", "relu"))

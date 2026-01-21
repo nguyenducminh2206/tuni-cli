@@ -1,11 +1,11 @@
 {
     "data": {
-        "path": "iris.csv",
-        "x_cols": ["sepal_length", "sepal_width", "petal_length", "petal_width"], 
-        "y_col": "class",
+        "path": "OU/OU_concat.csv",
+        "x_cols": "time_point_1:time_point_11", 
+        "y_col": "mu",
         "sequence_mode": "split",
         "balance": true,
-        "split_by": "noise"
+        "split_by": "sigma"
     },
 
     "model": {

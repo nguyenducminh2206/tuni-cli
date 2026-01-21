@@ -3,6 +3,7 @@ import os
 from typing import List, Optional
 from importlib.metadata import version, PackageNotFoundError
 from mi_race.train.orchestrator import run_cmd
+from mi_race.data_preprocessing.concat import run_concat_csv_files
 from mi_race.reporting.compare_models import run_compare
 
 
@@ -112,6 +113,20 @@ def main() -> None:
     p_cmp = sub.add_parser("compare", help="plot overall accuracy and accuracy vs noise from outputs/summary_models.csv")
     p_cmp.add_argument("--split", help="restrict compare to a single split prefix (e.g., 'noise' or 'kcross')")
     p_cmp.set_defaults(func=run_compare)
+
+    # mi-race concat csv-files -c config.json
+    p_concat = sub.add_parser("concat", help="concatenate helper commands")
+    concat_sub = p_concat.add_subparsers(dest="concat_cmd")
+
+    p_concat_csv = concat_sub.add_parser(
+        "csv-files",
+        help="if data.path is a folder: concat CSVs (auto-detects nested subfolders); if it's a CSV file: pass through; writes <name>_concat.csv",
+    )
+    p_concat_csv.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_concat_csv.add_argument("--out", help="output csv path override")
+    p_concat_csv.add_argument("--pattern", default="*.csv", help="glob pattern (default: *.csv)")
+    p_concat_csv.add_argument("--recursive", action="store_true", help="search subfolders")
+    p_concat_csv.set_defaults(func=run_concat_csv_files)
 
     args = parser.parse_args()
 

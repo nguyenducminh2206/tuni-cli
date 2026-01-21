@@ -11,6 +11,7 @@ from pathlib import Path
 import json
 import numpy as np
 import pandas as pd
+from typing import Any
 from sklearn.metrics import confusion_matrix, accuracy_score, f1_score
 
 from ..analysis import info_from_confusion_matrix
@@ -35,6 +36,25 @@ from .orchestrator_utils import (
 )
 
 from ..cli.ui import render_box
+
+
+def _normalize_labels_for_metrics(y: Any) -> np.ndarray:
+    """Return 1D, discrete labels suitable for sklearn classification metrics.
+
+    scikit-learn treats non-integer float targets as "continuous", which raises
+    `ValueError: continuous is not supported` for classification metrics.
+    """
+    arr = np.asarray(y)
+    if arr.ndim > 1:
+        arr = arr.reshape(-1)
+
+    if arr.dtype.kind == "f":
+        finite = np.isfinite(arr)
+        if finite.all() and np.allclose(arr, np.round(arr)):
+            return np.round(arr).astype(int)
+        return arr.astype(str)
+
+    return arr
 
 
 
@@ -82,6 +102,7 @@ def run_cmd(args):
         ],
         title="Dataset",
         min_width=76,
+        max_width=110,
     )
     print("\n" + ds_box)
 
@@ -232,9 +253,11 @@ def run_cmd(args):
                     sub_counts,
                 )
                 # Per-noise metrics & summary update
-                acc_sub = accuracy_score(y_t_sub, y_p_sub)
-                labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
-                cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
+                y_t_sub_m = _normalize_labels_for_metrics(y_t_sub)
+                y_p_sub_m = _normalize_labels_for_metrics(y_p_sub)
+                acc_sub = accuracy_score(y_t_sub_m, y_p_sub_m)
+                labels_sub = sorted(pd.Series(y_t_sub_m).dropna().unique().tolist())
+                cm_sub = confusion_matrix(y_t_sub_m, y_p_sub_m, labels=labels_sub)
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
                 # Print split-level summary with epochs, CM, and MI
                 print(
@@ -281,9 +304,11 @@ def run_cmd(args):
                     random_state,
                     sub_stratify,
                 )
-                acc_sub = accuracy_score(y_t_sub, y_p_sub)
-                labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
-                cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
+                y_t_sub_m = _normalize_labels_for_metrics(y_t_sub)
+                y_p_sub_m = _normalize_labels_for_metrics(y_p_sub)
+                acc_sub = accuracy_score(y_t_sub_m, y_p_sub_m)
+                labels_sub = sorted(pd.Series(y_t_sub_m).dropna().unique().tolist())
+                cm_sub = confusion_matrix(y_t_sub_m, y_p_sub_m, labels=labels_sub)
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
                 # Epochs from CNN config
                 epochs_cnn = int(selected_cfg.get("epochs", 5)) if isinstance(selected_cfg, dict) else 5
@@ -329,9 +354,11 @@ def run_cmd(args):
                     random_state,
                     sub_stratify,
                 )
-                acc_sub = accuracy_score(y_t_sub, y_p_sub)
-                labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
-                cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
+                y_t_sub_m = _normalize_labels_for_metrics(y_t_sub)
+                y_p_sub_m = _normalize_labels_for_metrics(y_p_sub)
+                acc_sub = accuracy_score(y_t_sub_m, y_p_sub_m)
+                labels_sub = sorted(pd.Series(y_t_sub_m).dropna().unique().tolist())
+                cm_sub = confusion_matrix(y_t_sub_m, y_p_sub_m, labels=labels_sub)
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
                 print(
                     f"[mi-race][rf] {split_feature}={split_value}  accuracy={acc_sub:.4f}"
@@ -424,9 +451,11 @@ def run_cmd(args):
                     random_state,
                     sub_stratify,
                 )
-                acc_sub = accuracy_score(y_t_sub, y_p_sub)
-                labels_sub = sorted(pd.Series(y_t_sub).dropna().unique().tolist())
-                cm_sub = confusion_matrix(y_t_sub, y_p_sub, labels=labels_sub)
+                y_t_sub_m = _normalize_labels_for_metrics(y_t_sub)
+                y_p_sub_m = _normalize_labels_for_metrics(y_p_sub)
+                acc_sub = accuracy_score(y_t_sub_m, y_p_sub_m)
+                labels_sub = sorted(pd.Series(y_t_sub_m).dropna().unique().tolist())
+                cm_sub = confusion_matrix(y_t_sub_m, y_p_sub_m, labels=labels_sub)
                 info_sub = info_from_confusion_matrix(cm_sub, labels=labels_sub)
                 epochs_rnn = int(selected_cfg.get("epochs", 5)) if isinstance(selected_cfg, dict) else 5
                 print(
@@ -449,15 +478,19 @@ def run_cmd(args):
     print("\n" + ("=" * 50) + " Result " + ("=" * 50))
 
     # Metrics
-    acc = accuracy_score(y_test, y_pred)
-    n_classes = sorted(pd.Series(y).dropna().unique().tolist())
-    cm = confusion_matrix(y_test, y_pred, labels=n_classes)
+    y_all_m = _normalize_labels_for_metrics(y)
+    y_test_m = _normalize_labels_for_metrics(y_test)
+    y_pred_m = _normalize_labels_for_metrics(y_pred)
+
+    acc = accuracy_score(y_test_m, y_pred_m)
+    n_classes = sorted(pd.Series(y_all_m).dropna().unique().tolist())
+    cm = confusion_matrix(y_test_m, y_pred_m, labels=n_classes)
     info = info_from_confusion_matrix(cm, labels=n_classes)
-    preds_unique = sorted(pd.Series(y_pred).dropna().unique().tolist())
+    preds_unique = sorted(pd.Series(y_pred_m).dropna().unique().tolist())
     missing_predicted = [c for c in n_classes if c not in preds_unique]
     if missing_predicted:
         print(f"[mi-race][WARN][{mtype}] No predicted samples for classes: {missing_predicted}. Metrics with zero_division=0.")
-    macro_f1 = f1_score(y_test, y_pred, average='macro', zero_division=0)
+    macro_f1 = f1_score(y_test_m, y_pred_m, average='macro', zero_division=0)
 
     # Report
     show_clf = cfg.get("output", {}).get("show_report", True)
@@ -466,7 +499,7 @@ def run_cmd(args):
     try:
         if 'y_proba' in locals() and y_proba is not None:
             k = int(cfg.get("output", {}).get("ksg_k", 5))
-            ksg_bits = ksg_mi_labels_probs(y_test, y_proba, k=k)
+            ksg_bits = ksg_mi_labels_probs(y_test_m, y_proba, k=k)
     except Exception:
         ksg_bits = None
     report_txt = build_report_text(
@@ -476,8 +509,8 @@ def run_cmd(args):
         macro_f1,
         cm,
         info,
-        y_test,
-        y_pred,
+        y_test_m,
+        y_pred_m,
         ksg_mi_bits=ksg_bits,
         show_clf_report=show_clf,
     )
@@ -495,8 +528,8 @@ def run_cmd(args):
         macro_f1,
         cm,
         info,
-        y_test,
-        y_pred,
+        y_test_m,
+        y_pred_m,
         show_clf_report=show_clf,
     )
     # Append to a global report aggregating all runs across models
