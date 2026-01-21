@@ -7,6 +7,24 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 
 
+def _normalize_labels_for_sklearn(y: np.ndarray) -> np.ndarray:
+    """Coerce labels into a discrete form for sklearn classifiers.
+
+    sklearn rejects non-integer float labels as "continuous".
+    - integer-like floats -> int
+    - other floats -> string
+    """
+    arr = np.asarray(y)
+    if arr.ndim > 1:
+        arr = arr.reshape(-1)
+    if arr.dtype.kind == "f":
+        finite = np.isfinite(arr)
+        if finite.all() and np.allclose(arr, np.round(arr)):
+            return np.round(arr).astype(int)
+        return arr.astype(str)
+    return arr
+
+
 def run_random_forest(
     feature_df: pd.DataFrame,
     y: np.ndarray,
@@ -23,10 +41,12 @@ def run_random_forest(
     - Supports common hyperparameters via model_cfg.
     """
     X = feature_df.to_numpy()
+    y_norm = _normalize_labels_for_sklearn(y)
+    stratify_norm = _normalize_labels_for_sklearn(stratify) if stratify is not None else None
 
     test_size = float(train_cfg.get("test_size", 0.2))
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state, stratify=stratify
+        X, y_norm, test_size=test_size, random_state=random_state, stratify=stratify_norm
     )
 
     train_counts = pd.Series(y_train).value_counts().sort_index()

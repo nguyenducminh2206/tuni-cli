@@ -157,7 +157,10 @@ def run_cmd(args):
     train_cfg = cfg.get("train", {})
     random_state = int(train_cfg.get("random_state", 42))
     standardize = bool(train_cfg.get("standardize", True))
-    stratify = y if train_cfg.get("stratify", True) else None
+    # Use discrete labels for any sklearn-based classifiers (e.g., RF) and for stratification.
+    # This avoids sklearn treating float labels as a continuous regression target.
+    y_for_training = _normalize_labels_for_metrics(y)
+    stratify = y_for_training if train_cfg.get("stratify", True) else None
 
     # Which column to split per-feature (e.g., 'noise' or 'kcross') for per-slice runs
     # Prefer explicit setting in data section, else train section, default to 'noise'
@@ -328,7 +331,7 @@ def run_cmd(args):
                 _update_split_accuracy_summary(base_out, "cnn", split_feature, split_value, float(acc_sub))
     elif mtype == "rf":
         from .models.random_forest import run_random_forest
-        y_test, y_pred, y_proba = run_random_forest(feature_df, y, train_cfg, selected_cfg, standardize, random_state, stratify)
+        y_test, y_pred, y_proba = run_random_forest(feature_df, y_for_training, train_cfg, selected_cfg, standardize, random_state, stratify)
 
         # Per-split-feature loop for RF
         if split_feature in df.columns:
@@ -340,12 +343,12 @@ def run_cmd(args):
                 print(f"\n=============== Training for {split_feature} {split_value} (rf) ===============")
                 mask = df[split_feature] == split_value
                 feature_df_sub = feature_df.loc[mask].reset_index(drop=True)
-                y_sub = y[mask.to_numpy()] if hasattr(mask, "to_numpy") else y[mask]
+                y_sub = y_for_training[mask.to_numpy()] if hasattr(mask, "to_numpy") else y_for_training[mask]
                 if feature_df_sub.empty or len(y_sub) == 0:
                     print(f"[mi-race][rf] Skipping {split_feature} {split_value}: no rows after filtering")
                     continue
                 sub_stratify = y_sub if train_cfg.get("stratify", True) else None
-                y_t_sub, y_p_sub = run_random_forest(
+                y_t_sub, y_p_sub, _ = run_random_forest(
                     feature_df_sub,
                     y_sub,
                     train_cfg,
