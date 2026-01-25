@@ -1,5 +1,7 @@
 import argparse
 import os
+import shlex
+import sys
 from typing import List, Optional
 from importlib.metadata import version, PackageNotFoundError
 from mi_race.train.orchestrator import run_cmd
@@ -75,6 +77,60 @@ def _print_banner(args: argparse.Namespace) -> None:
     print(box)
 
 
+def _run_shell(parser: argparse.ArgumentParser, *, startup_args: argparse.Namespace) -> None:
+    """Interactive shell that reuses the existing argparse parser and handlers."""
+    print("Hello from mi-race! Pick a command below.\n")
+    parser.print_help()
+    print("\nType 'help' to see this again, 'exit' to quit.\n")
+
+    while True:
+        try:
+            line = input("\033[32mmi-race> \033[0m").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n[mi-race] Bye.")
+            return
+
+        if not line:
+            continue
+
+        low = line.lower()
+        if low in {"exit", "quit"}:
+            print("[mi-race] Bye.")
+            return
+        if low in {"help", "?"}:
+            parser.print_help()
+            continue
+
+        # Allow either: `run -c config.json` or `mi-race run -c config.json`
+        if low.startswith("mi-race "):
+            line = line[len("mi-race ") :].lstrip()
+
+        try:
+            tokens = shlex.split(line, posix=(os.name != "nt"))
+        except ValueError as e:
+            print(f"[mi-race][shell] Parse error: {e}")
+            continue
+
+        try:
+            args = parser.parse_args(tokens)
+        except SystemExit:
+            # argparse calls sys.exit() on -h or parse errors; keep shell alive.
+            continue
+
+        if getattr(args, "cmd", None) is None:
+            print("[mi-race][shell] Please enter a command (e.g., 'run', 'run-all', 'compare', 'concat').")
+            continue
+
+        try:
+            args.func(args)
+        except SystemExit as e:
+            # Keep shell alive even if a subcommand uses SystemExit for errors.
+            if str(e):
+                print(str(e))
+        except Exception as e:
+            print(f"[mi-race][shell][ERROR] {type(e).__name__}: {e}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="mi-race",
@@ -133,10 +189,10 @@ def main() -> None:
     # Print banner
     _print_banner(args)
 
-    # If no subcommand provided, show a friendly greeting and usage
+    # If no subcommand provided, enter interactive shell.
+    # (Help/version flags are handled by argparse before we get here.)
     if getattr(args, "cmd", None) is None:
-        print("Hello from mi-race! Pick a command below.\n")
-        parser.print_help()
+        _run_shell(parser, startup_args=args)
         return
 
     # Dispatch to subcommand handler
