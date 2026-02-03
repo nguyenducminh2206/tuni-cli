@@ -2,6 +2,7 @@ import argparse
 import os
 import shlex
 import sys
+import subprocess
 from typing import List, Optional
 from importlib.metadata import version, PackageNotFoundError
 from mi_race.train.orchestrator import run_cmd
@@ -81,7 +82,16 @@ def _run_shell(parser: argparse.ArgumentParser, *, startup_args: argparse.Namesp
     """Interactive shell that reuses the existing argparse parser and handlers."""
     print("Hello from mi-race! Pick a command below.\n")
     parser.print_help()
-    print("\nType 'help' to see this again, 'exit' to quit.\n")
+    print("\nType 'help' to see this again, 'exit' to quit.")
+    print("Type 'edit' or 'edit config.json' to edit your config.\n")
+
+    def _open_notepad(path: str) -> None:
+        abs_path = os.path.abspath(path)
+        if os.name == "nt":
+            subprocess.run(["notepad", abs_path], check=False)
+        else:
+            # Fallback for non-Windows environments
+            subprocess.run(["nano", abs_path], check=False)
 
     while True:
         try:
@@ -99,6 +109,15 @@ def _run_shell(parser: argparse.ArgumentParser, *, startup_args: argparse.Namesp
             return
         if low in {"help", "?"}:
             parser.print_help()
+            continue
+
+        # Built-in: edit config without leaving the shell
+        if low == "edit":
+            _open_notepad("config.json")
+            continue
+        if low.startswith("edit "):
+            target = line.split(" ", 1)[1].strip().strip('"')
+            _open_notepad(target or "config.json")
             continue
 
         # Allow either: `run -c config.json` or `mi-race run -c config.json`
