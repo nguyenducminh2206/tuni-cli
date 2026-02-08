@@ -36,6 +36,7 @@ from .orchestrator_utils import (
 )
 
 from ..cli.ui import render_box
+from ..data_preprocessing.filter_csv import apply_filter_expression, default_filtered_temp_path
 
 
 def _normalize_labels_for_metrics(y: Any) -> np.ndarray:
@@ -80,6 +81,36 @@ def run_cmd(args):
 
     # Load dataset
     df = dp_load_df_from_cfg(data_cfg)
+
+    # Optional: one-shot config filter (applied before any balancing / feature building)
+    filter_expr = None
+    if isinstance(cfg, dict):
+        filter_expr = cfg.get("filter")
+    if not filter_expr and isinstance(data_cfg, dict):
+        filter_expr = data_cfg.get("filter")
+
+    filter_expr = str(filter_expr).strip() if filter_expr is not None else ""
+    if filter_expr:
+        before_n = len(df)
+        df = apply_filter_expression(df, filter_expr)
+        after_n = len(df)
+
+        # Save filtered artifact into temp/
+        source_stem = "data"
+        raw_path = data_cfg.get("path") if isinstance(data_cfg, dict) else None
+        if raw_path:
+            p = Path(str(raw_path))
+            if p.exists() and p.is_dir():
+                # Our concat default is temp/<folder>_concat.csv
+                source_stem = f"{p.name}_concat"
+            elif p.exists() and p.is_file() and p.suffix.lower() == ".csv":
+                source_stem = p.stem
+
+        filtered_path = default_filtered_temp_path(source_stem, filter_expr)
+        df.to_csv(filtered_path, index=False)
+        print(f"[mi-race] Applied config filter: {filter_expr}")
+        print(f"[mi-race] Filtered rows: {after_n:,} (from {before_n:,})")
+        print(f"[mi-race] Wrote: {filtered_path}")
 
     # Pre-run header box
     selection = getattr(args, "model", None)

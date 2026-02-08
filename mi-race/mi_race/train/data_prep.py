@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from ..data_preprocessing.process_data import build_df
+from ..data_preprocessing.concat import concat_csvs_in_folder_to_csv
 
 
 def ensure_outdir(path: Path) -> None:
@@ -53,7 +54,18 @@ def load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
                 if suf == ".parquet":
                     return pd.read_parquet(p)
                 raise SystemExit(f"[mi-race] Unsupported file extension: {suf}")
-            # Directory OR something like 'data_7x7' (no extension) -> dataset id
+            # Directory:
+            # - If it contains CSVs (possibly only in subfolders), treat it as a CSV dataset and auto-concat into temp/.
+            # - Otherwise, keep existing behavior: treat as dataset id -> build_df(folder name)
+            try:
+                has_csv = next(p.rglob("*.csv"), None) is not None
+            except Exception:
+                has_csv = False
+
+            if has_csv:
+                concat_path = concat_csvs_in_folder_to_csv(p)
+                return pd.read_csv(concat_path)
+
             return build_df(p.name, n_samples_per_file=n_samples_per_file)
         # Not existing path: treat string as dataset id
         return build_df(path, n_samples_per_file=n_samples_per_file)

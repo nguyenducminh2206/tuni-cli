@@ -1470,3 +1470,109 @@ weighted avg     0.6450    0.6481    0.6422      3200
 --------------------------------------------------------------------------
 --------------------------------------------------------------------------
 
+Starting time: 8 Feb 2026, 4:48pm
+Elapsed time: 19 second
+
+"data": {
+    "path": "OU",
+    "x_cols": "time_point_1:time_point_11",
+    "y_col": "mu",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: ['0.0', '0.5', '1.0', '1.5']
+╭─────────────────── Results: mlp (test) ────────────────────╮
+│ Accuracy: 68.88%                                           │
+│ Macro F1:  68.62%                                          │
+│                                                            │
+│ MI (cm):   0.9107 bits                                     │
+│ NMI_sqrt:  0.4556                                          │
+╰────────────────────────────────────────────────────────────╯
+╭───────────────── Confusion Matrix (test) ──────────────────╮
+│         0.0   0.5   1.0   1.5                              │
+│     ------------------------                               │
+│ 0.0 |   157    41     2     0                              │
+│ 0.5 |    54   113    32     1                              │
+│ 1.0 |     0    39   116    45                              │
+│ 1.5 |     0     1    34   165                              │
+╰────────────────────────────────────────────────────────────╯
+
+=== Mutual Information (from confusion matrix) ===
+H(true): 2.0000 bits  |  H(pred): 1.9976 bits  |  Hjoint: 3.0869 bits
+I(true;pred): 0.9107 bits  |  NMI_sqrt: 0.4556  |  NMI_min: 0.4559  |  NMI_max: 0.4553
+H(true|pred): 1.0893 bits  |  H(pred|true): 1.0869 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+         0.0     0.7441    0.7850    0.7640       200
+         0.5     0.5825    0.5650    0.5736       200
+         1.0     0.6304    0.5800    0.6042       200
+         1.5     0.7820    0.8250    0.8029       200
+
+    accuracy                         0.6887       800
+   macro avg     0.6847    0.6887    0.6862       800
+weighted avg     0.6847    0.6887    0.6862       800
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+
+Starting time: 8 Feb 2026, 4:51pm
+Elapsed time: 1 second
+
+"data": {
+    "path": "OU",
+    "x_cols": "time_point_1:time_point_11",
+    "y_col": "mu",
+    "sequence_mode": "split",
+    "balance": true
+}
+
+"mlp": {
+    "batch_size": 64,
+    "epochs": 15,
+    "lr": 0.001
+}
+
+=== Model: mlp ===
+Classes: ['1.5']
+╭─────────────────── Results: mlp (test) ────────────────────╮
+│ Accuracy: 100.00%                                          │
+│ Macro F1:  100.00%                                         │
+│                                                            │
+│ MI (cm):   0.0000 bits                                     │
+│ NMI_sqrt:  0.0000                                          │
+╰────────────────────────────────────────────────────────────╯
+╭───────────────── Confusion Matrix (test) ──────────────────╮
+│         1.5                                                │
+│     ------                                                 │
+│ 1.5 |   200                                                │
+╰────────────────────────────────────────────────────────────╯
+
+=== Mutual Information (from confusion matrix) ===
+H(true): -0.0000 bits  |  H(pred): -0.0000 bits  |  Hjoint: -0.0000 bits
+I(true;pred): 0.0000 bits  |  NMI_sqrt: 0.0000  |  NMI_min: 0.0000  |  NMI_max: 0.0000
+H(true|pred): 0.0000 bits  |  H(pred|true): 0.0000 bits
+
+=== Classification Report (test) ===
+              precision    recall  f1-score   support
+
+         1.5     1.0000    1.0000    1.0000       200
+
+    accuracy                         1.0000       200
+   macro avg     1.0000    1.0000    1.0000       200
+weighted avg     1.0000    1.0000    1.0000       200
+
+
+--------------------------------------------------------------------------
+--------------------------------------------------------------------------
+

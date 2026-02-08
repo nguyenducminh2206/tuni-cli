@@ -7,6 +7,7 @@ from typing import List, Optional
 from importlib.metadata import version, PackageNotFoundError
 from mi_race.train.orchestrator import run_cmd
 from mi_race.data_preprocessing.concat import run_concat_csv_files
+from mi_race.data_preprocessing.filter_csv import run_filter_csv
 from mi_race.reporting.compare_models import run_compare
 
 
@@ -84,6 +85,7 @@ def _run_shell(parser: argparse.ArgumentParser, *, startup_args: argparse.Namesp
     parser.print_help()
     print("\nType 'help' to see this again, 'exit' to quit.")
     print("Type 'edit' or 'edit config.json' to edit your config.\n")
+    print("Type 'filter' to filter rows from your concat CSV.\n")
 
     def _open_notepad(path: str) -> None:
         abs_path = os.path.abspath(path)
@@ -202,6 +204,18 @@ def main() -> None:
     p_concat_csv.add_argument("--pattern", default="*.csv", help="glob pattern (default: *.csv)")
     p_concat_csv.add_argument("--recursive", action="store_true", help="search subfolders")
     p_concat_csv.set_defaults(func=run_concat_csv_files)
+
+    # mi-race filter [-c config.json] [--file OU_concat.csv]
+    p_filter = sub.add_parser(
+        "filter",
+        help="filter rows from a concatenated CSV and write a new CSV next to it",
+    )
+    p_filter.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_filter.add_argument("--file", help="input csv path override (e.g., OU/OU_concat.csv)")
+    p_filter.add_argument("--out", help="output csv path override")
+    p_filter.add_argument("--column", help="column name to filter (skips prompt if used with --value)")
+    p_filter.add_argument("--value", help="value to match (skips prompt if used with --column)")
+    p_filter.set_defaults(func=run_filter_csv)
 
     args = parser.parse_args()
 

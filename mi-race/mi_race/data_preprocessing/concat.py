@@ -7,6 +7,13 @@ from typing import Any
 import pandas as pd
 
 
+def _default_temp_dir() -> Path:
+    # Workspace-local temp folder
+    p = Path("temp")
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def _read_csv_columns(path: Path) -> list[str]:
     # Read header only (fast)
     cols = list(pd.read_csv(path, nrows=0).columns)
@@ -86,6 +93,38 @@ def _concat_csvs_in_folder(
     return pd.concat(frames, axis=0, ignore_index=True, sort=False)
 
 
+def concat_csvs_in_folder_to_csv(
+    folder: Path,
+    *,
+    out_path: Path | None = None,
+    pattern: str = "*.csv",
+    recursive: bool = False,
+    auto_recursive: bool = True,
+) -> Path:
+    """Concatenate CSVs in `folder` and write a single CSV.
+
+    Default output: temp/<folder>_concat.csv
+    """
+    if not folder.exists() or not folder.is_dir():
+        raise SystemExit(f"[mi-race] Not a folder: {folder}")
+
+    df = _concat_csvs_in_folder(
+        folder,
+        pattern=pattern,
+        recursive=recursive,
+        auto_recursive=auto_recursive,
+    )
+
+    if out_path is None:
+        out_path = _default_temp_dir() / f"{folder.name}_concat.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    df.to_csv(out_path, index=False)
+    print(f"[mi-race] Wrote: {out_path}")
+    print(f"[mi-race] Rows: {len(df):,}  Columns: {len(df.columns):,}")
+    return out_path
+
+
 def concat_csv_files_from_config(
     config_path: Path,
     *,
@@ -100,8 +139,6 @@ def concat_csv_files_from_config(
         cfg: dict[str, Any] = json.load(f)
 
     data_cfg = cfg.get("data", {}) if isinstance(cfg, dict) else {}
-    out_cfg = cfg.get("output", {}) if isinstance(cfg, dict) else {}
-
     path_raw = data_cfg.get("path")
     if not path_raw:
         raise SystemExit("[mi-race] concat csv-files requires data.path in config")
@@ -120,12 +157,8 @@ def concat_csv_files_from_config(
         default_name = f"{p.stem}_concat.csv"
 
     if out_path is None:
-        # Default: write next to the provided data.path.
-        # - folder -> <folder>/<folder>_concat.csv
-        # - file   -> <file_dir>/<file_stem>_concat.csv
-        out_dir = p if p.is_dir() else p.parent
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / default_name
+        # Default: always write to workspace temp/ (avoid touching source data folders)
+        out_path = _default_temp_dir() / default_name
     else:
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
