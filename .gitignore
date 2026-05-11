@@ -10,6 +10,11 @@ __pycache__/
 # h5 file
 *.h5
 
+# Claude file
+CLAUDE.md
+PLAN.md
+.claude/
+
 # Project outputs (generated artifacts)
 # Ignore outputs under mi-race (CSV/JSON reports, etc.)
 mi-race/outputs/
