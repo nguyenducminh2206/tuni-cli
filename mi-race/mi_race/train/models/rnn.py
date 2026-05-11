@@ -86,6 +86,7 @@ def run_rnn(
     model_cfg: dict,
     random_state: int,
     stratify,
+    quiet: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Train a simple LSTM/GRU-like RNN on a kept sequence column and return (y_test, y_pred).
 
@@ -101,20 +102,15 @@ def run_rnn(
     lengths = seq_series.apply(lambda a: a.size)
     if lengths.max() == 0:
         raise SystemExit("[mi-race] RNN: all sequences appear empty.")
-    # Log basic sequence stats so users can verify raw sequences are being used
-    try:
-        print(
-            "[mi-race][rnn] Sequence stats:",
-            {
-                "col": sequence_col,
-                "count": int(lengths.shape[0]),
-                "len_min": int(lengths.min()),
-                "len_max": int(lengths.max()),
-                "len_mean": float(lengths.mean()),
-            },
-        )
-    except Exception:
-        pass
+    if not quiet:
+        try:
+            print(
+                f"[rnn] sequences: col='{sequence_col}' count={int(lengths.shape[0])} "
+                f"len_min={int(lengths.min())} len_max={int(lengths.max())} "
+                f"len_mean={float(lengths.mean()):.1f}"
+            )
+        except Exception:
+            pass
 
     # Train/test split on indices to keep alignment
     idx = np.arange(len(raw_df))
@@ -164,12 +160,12 @@ def run_rnn(
     weight_decay = float(model_cfg.get("weight_decay", 0.0))
     momentum = float(model_cfg.get("momentum", 0.9)) if optimizer_name == "sgd" else None
     dropout = float(model_cfg.get("dropout", 0.0))
-    print(
-        f"[mi-race][rnn] Settings: max_len={max_len}, pad_value={pad_value}, standardize={standardize}, "
-        f"downsample_every={downsample_every}, window_len={window_len}, window_pos={window_pos}, "
-        f"optimizer={optimizer_name}, lr={model_cfg.get('lr', 1e-3)}, weight_decay={weight_decay}, "
-        f"momentum={(momentum if momentum is not None else 'n/a')}, dropout={dropout}"
-    )
+    if not quiet:
+        print(
+            f"[rnn] max_len={max_len} pad={pad_value} standardize={standardize} "
+            f"downsample={downsample_every} window={window_len}/{window_pos} "
+            f"opt={optimizer_name} lr={model_cfg.get('lr', 1e-3)}"
+        )
 
     # Build fixed-length arrays
     def build_matrix(indices: np.ndarray) -> np.ndarray:
@@ -214,7 +210,8 @@ def run_rnn(
         device = torch.device("cuda")
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[mi-race][rnn] device: {device}")
+    if not quiet:
+        print(f"[rnn] device: {device}")
     model = RNNClassifier(input_size=1, hidden_size=hidden_size, num_layers=num_layers,
                           num_classes=num_classes, bidirectional=bidir, dropout=dropout).to(device)
     if optimizer_name == "sgd":
@@ -236,7 +233,7 @@ def run_rnn(
         total = 0
         correct = 0
         iterator = train_loader
-        if tqdm is not None:
+        if (not quiet) and (tqdm is not None):
             iterator = tqdm(train_loader, desc=f"[rnn] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:
             xb = xb.to(device)
@@ -253,7 +250,8 @@ def run_rnn(
             correct += (preds == yb).sum().item()
         avg_loss = total_loss / max(total, 1)
         train_acc = correct / max(total, 1)
-        print(f"[mi-race][rnn] epoch {ep}/{epochs}  loss={avg_loss:.4f}  acc={train_acc:.4f}")
+        if not quiet:
+            print(f"[rnn] epoch {ep}/{epochs}  loss={avg_loss:.4f}  acc={train_acc:.4f}")
 
     model.eval()
     y_pred_idx = []

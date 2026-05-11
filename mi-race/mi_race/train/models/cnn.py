@@ -18,7 +18,8 @@ def run_cnn(feature_df: pd.DataFrame,
             model_cfg: dict,
             standardize: bool,
             random_state: int,
-            stratify) -> Tuple[np.ndarray, np.ndarray]:
+            stratify,
+            quiet: bool = False) -> Tuple[np.ndarray, np.ndarray]:
     """Train a simple 1D CNN on split sequence features and return (y_test, y_pred)."""
     # Detect groups of columns named like '<prefix>_<idx>' and pick the desired prefix
     pat = re.compile(r"^(?P<prefix>.+)_(?P<idx>\d+)$")
@@ -53,7 +54,8 @@ def run_cnn(feature_df: pd.DataFrame,
             )
 
     seq_cols_sorted = [name for idx, name in sorted(groups[chosen_prefix], key=lambda t: t[0])]
-    print(f"[mi-race][cnn] Using split sequence group '{chosen_prefix}' with {len(seq_cols_sorted)} steps")
+    if not quiet:
+        print(f"[cnn] using split sequence group '{chosen_prefix}' ({len(seq_cols_sorted)} steps)")
     X_seq = feature_df[seq_cols_sorted].to_numpy(dtype=float)
 
     if standardize:
@@ -65,11 +67,11 @@ def run_cnn(feature_df: pd.DataFrame,
         X_seq, y, test_size=test_size, random_state=random_state, stratify=stratify
     )
 
-    train_counts = pd.Series(y_train).value_counts().sort_index()
-    test_counts  = pd.Series(y_test).value_counts().sort_index()
-    print(f"[mi-race][cnn] Total rows: {feature_df.shape[0]}")
-    print(f"[mi-race][cnn] Class distribution (train): {train_counts.to_dict()}")
-    print(f"[mi-race][cnn] Class distribution (test):  {test_counts.to_dict()}")
+    if not quiet:
+        train_counts = pd.Series(y_train).value_counts().sort_index()
+        test_counts = pd.Series(y_test).value_counts().sort_index()
+        print(f"[cnn] {feature_df.shape[0]} rows  ·  train {dict((str(k), int(v)) for k, v in train_counts.items())}")
+        print(f"[cnn] test  {dict((str(k), int(v)) for k, v in test_counts.items())}")
 
     classes_sorted = sorted(pd.Series(y).dropna().unique().tolist())
     num_classes = len(classes_sorted)
@@ -99,7 +101,8 @@ def run_cnn(feature_df: pd.DataFrame,
         sampler = WeightedRandomSampler(weights=torch.tensor(sample_weights, dtype=torch.float32),
                                         num_samples=len(sample_weights),
                                         replacement=True)
-        print("[mi-race][cnn] Using WeightedRandomSampler for class balancing")
+        if not quiet:
+            print("[cnn] using WeightedRandomSampler for class balancing")
         train_loader = DataLoader(SeqDataset(X_train, y_train_idx), batch_size=batch_size, sampler=sampler)
     else:
         train_loader = DataLoader(SeqDataset(X_train, y_train_idx), batch_size=batch_size, shuffle=True)
@@ -150,7 +153,8 @@ def run_cnn(feature_df: pd.DataFrame,
         device = torch.device("cuda")
     else:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"[mi-race][cnn] device: {device}")
+    if not quiet:
+        print(f"[cnn] device: {device}")
     model = CNN1D(L).to(device)
     epochs = int(model_cfg.get("epochs", 5))
     # Hardcoded cadence: show tqdm/progress + epoch logs every 5 epochs
@@ -166,7 +170,8 @@ def run_cnn(feature_df: pd.DataFrame,
         inv_freq = 1.0 / counts
         weights = inv_freq * (num_classes / inv_freq.sum())
         weight_tensor = torch.tensor(weights, dtype=torch.float32, device=device)
-        print(f"[mi-race][cnn] Using class weights (balanced): {weights.tolist()}")
+        if not quiet:
+            print(f"[cnn] class weights (balanced): {weights.tolist()}")
         criterion = nn.CrossEntropyLoss(weight=weight_tensor)
     else:
         criterion = nn.CrossEntropyLoss()
@@ -183,7 +188,7 @@ def run_cnn(feature_df: pd.DataFrame,
         correct = 0
         iterator = train_loader
         # Only show tqdm progress on selected epochs to reduce noise
-        show_bar = (tqdm is not None) and (ep % log_every_epochs == 0)
+        show_bar = (not quiet) and (tqdm is not None) and (ep % log_every_epochs == 0)
         if show_bar:
             iterator = tqdm(train_loader, desc=f"[cnn] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:
@@ -222,11 +227,12 @@ def run_cnn(feature_df: pd.DataFrame,
                 test_loss = t_loss_sum / max(t_total, 1)
                 test_acc = t_correct / max(t_total, 1)
             model.train()
-            print(
-                f"[mi-race][cnn] epoch {ep}/{epochs}  "
-                f"train_loss={avg_loss:.4f} train_acc={train_acc:.4f}  "
-                f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}"
-            )
+            if not quiet:
+                print(
+                    f"[cnn] epoch {ep}/{epochs}  "
+                    f"train_loss={avg_loss:.4f} train_acc={train_acc:.4f}  "
+                    f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}"
+                )
 
     model.eval()
     y_pred_idx = []
@@ -245,9 +251,9 @@ def run_cnn(feature_df: pd.DataFrame,
             preds = torch.argmax(logits, dim=1)
             final_correct += (preds == yb).sum().item()
             y_pred_idx.extend(preds.cpu().numpy().tolist())
-    if final_total > 0:
+    if (not quiet) and final_total > 0:
         final_test_loss = final_loss_sum / final_total
         final_test_acc = final_correct / final_total
-        print(f"[mi-race][cnn] final test: loss={final_test_loss:.4f} acc={final_test_acc:.4f}")
+        print(f"[cnn] final test: loss={final_test_loss:.4f} acc={final_test_acc:.4f}")
     y_pred = np.array([idx_to_label[i] for i in y_pred_idx])
     return y_test, y_pred

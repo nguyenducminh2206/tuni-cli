@@ -8,86 +8,79 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report
 
-from mi_race.cli.ui import render_box
+from mi_race.cli.ui import render_box, render_confusion_matrix
 
 
 def ensure_outdir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
-def cm_table(cm: np.ndarray, labels: List) -> str:
-    """Create a clean confusion matrix table without internal vertical bars."""
-    header_labels = [str(label) for label in labels]
-    header = "     " + "".join(f"{label:>6}" for label in header_labels)
-    separator = "    " + "-" * (6 * len(labels))
-    rows = []
-    for i, label in enumerate(labels):
-        row_values = "".join(f"{int(cm[i][j]):>6}" for j in range(len(labels)))
-        rows.append(f"{str(label):>3} |{row_values}")
-    return "\n".join([header, separator] + rows)
-
-
 def _format_pct(x: float) -> str:
     return f"{x * 100:.2f}%"
 
 
-def _results_box_lines(acc: float, macro_f1: float, info: dict, ksg_mi_bits: float | None) -> List[str]:
+def _stringify_labels(labels: List) -> List[str]:
+    """Coerce labels to plain str so numpy types don't leak into output."""
+    return [str(l) for l in labels]
+
+
+def build_screen_summary(
+    model_name: str,
+    n_classes: List,
+    acc: float,
+    macro_f1: float,
+    cm: np.ndarray,
+    info: dict,
+) -> str:
+    """A concise final-result box: headline metrics + confusion matrix.
+
+    Verbose details (H values, KSG MI, classification report) are written to
+    ``report.txt`` via :func:`build_report_text` but kept off-screen.
+    """
     mi_bits = float(info.get("I", 0.0))
     nmi_sqrt = float(info.get("NMI_sqrt", 0.0))
+    labels = _stringify_labels(n_classes)
 
-    lines: List[str] = [
-        f"Accuracy: {_format_pct(acc)}",
-        f"Macro F1:  {_format_pct(macro_f1)}",
+    summary_lines = [
+        f"Accuracy   {_format_pct(acc):<10}  Macro F1   {_format_pct(macro_f1)}",
+        f"MI (cm)    {mi_bits:.4f} bits  NMI_sqrt   {nmi_sqrt:.4f}",
         "",
-        f"MI (cm):   {mi_bits:.4f} bits",
-        f"NMI_sqrt:  {nmi_sqrt:.4f}",
+        "Confusion Matrix",
+        *render_confusion_matrix(cm, labels, indent=0).splitlines(),
     ]
-
-    if ksg_mi_bits is not None:
-        delta = mi_bits - float(ksg_mi_bits)
-        lines += [
-            f"KSG MI:    {float(ksg_mi_bits):.4f} bits",
-            f"Δ(MI-KSG): {delta:+.4f} bits",
-        ]
-
-    return lines
+    return render_box(summary_lines, title=f"Result: {model_name} (test)", min_width=72)
 
 
-def _boxed_confusion_matrix(cm: np.ndarray, labels: List, *, title: str = "Confusion Matrix (test)") -> str:
-    table_lines = cm_table(cm, labels).splitlines()
-    return render_box(table_lines, title=title, min_width=max(60, max((len(x) for x in table_lines), default=0)))
-
-
-def build_report_text(model_name: str,
-                      n_classes: list,
-                      acc: float,
-                      macro_f1: float,
-                      cm: np.ndarray,
-                      info: dict,
-                      y_test: np.ndarray,
-                      y_pred: np.ndarray,
-                      ksg_mi_bits: float | None = None,
-                      show_clf_report: bool = True) -> str:
-    parts = []
-    parts.append(f"\n=== Model: {model_name} ===\n")
-    parts.append(f"Classes: {n_classes}\n")
-
-    results_title = f"Results: {model_name} (test)"
-    parts.append(render_box(_results_box_lines(acc, macro_f1, info, ksg_mi_bits), title=results_title, min_width=60))
-    parts.append("\n")
-    parts.append(_boxed_confusion_matrix(cm, n_classes))
-    parts.append("\n")
-
-    parts.append("\n=== Mutual Information (from confusion matrix) ===\n")
-    parts.append(
+def build_report_text(
+    model_name: str,
+    n_classes: list,
+    acc: float,
+    macro_f1: float,
+    cm: np.ndarray,
+    info: dict,
+    y_test: np.ndarray,
+    y_pred: np.ndarray,
+    ksg_mi_bits: float | None = None,
+    show_clf_report: bool = True,
+) -> str:
+    """Verbose text used for the saved ``report.txt`` and global report."""
+    labels = _stringify_labels(n_classes)
+    parts = [
+        f"\n=== Model: {model_name} ===\n",
+        f"Classes: {labels}\n",
+        f"Accuracy: {_format_pct(acc)}\n",
+        f"Macro F1: {_format_pct(macro_f1)}\n\n",
+        "Confusion Matrix (test)\n",
+        render_confusion_matrix(cm, labels),
+        "\n\n=== Mutual Information (from confusion matrix) ===\n",
         (
             f"H(true): {info['H_true']:.4f} bits  |  H(pred): {info['H_pred']:.4f} bits  |  Hjoint: {info['H_joint']:.4f} bits\n"
             f"I(true;pred): {info['I']:.4f} bits  |  NMI_sqrt: {info['NMI_sqrt']:.4f}  |  NMI_min: {info['NMI_min']:.4f}  |  NMI_max: {info['NMI_max']:.4f}\n"
             f"H(true|pred): {info['H_true_given_pred']:.4f} bits  |  H(pred|true): {info['H_pred_given_true']:.4f} bits\n"
-        )
-    )
+        ),
+    ]
     if ksg_mi_bits is not None:
-        parts.append(f"\n=== KSG MI (labels;probs) ===\n")
+        parts.append("\n=== KSG MI (labels;probs) ===\n")
         parts.append(f"KSG I(true;probs): {ksg_mi_bits:.4f} bits\n")
     if show_clf_report:
         parts.append("\n=== Classification Report (test) ===\n")

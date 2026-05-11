@@ -1,12 +1,11 @@
 {
     "data": {
-        "path": "OU",
+        "path": "temp/OU_concat.csv",
         "x_cols": "time_point_1:time_point_11", 
         "y_col": "mu",
         "sequence_mode": "split",
         "balance": true,
-        "split_by": "sigma",
-	"filter": "sigma==0.5&mu=1.5"
+        "split_by": "sigma"
     },
 
     "model": {

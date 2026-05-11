@@ -1,0 +1,2 @@
+model,accuracy,sigma_0.50,sigma_1.00
+rf,0.8958333333333334,1.0,0.875

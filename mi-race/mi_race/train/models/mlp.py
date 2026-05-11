@@ -92,6 +92,7 @@ def run_mlp(
     random_state: int,
     stratify,
     full_counts: pd.Series,
+    quiet: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
     """Train a torch MLP and return (y_test, y_pred, y_proba)."""
 
@@ -122,18 +123,19 @@ def run_mlp(
     def _counts_to_label_dict(counts: pd.Series) -> dict:
         out: dict = {}
         for idx, cnt in counts.items():
-            out[idx_to_label.get(int(idx), idx)] = int(cnt)
+            out[str(idx_to_label.get(int(idx), idx))] = int(cnt)
         return out
-    print(f"[mi-race][mlp] Total rows: {feature_df.shape[0]}")
-    print(f"[mi-race][mlp] Class distribution (train): {_counts_to_label_dict(train_counts)}")
-    print(f"[mi-race][mlp] Class distribution (test):  {_counts_to_label_dict(test_counts)}")
+
+    if not quiet:
+        print(f"[mlp] {feature_df.shape[0]} rows  ·  train {_counts_to_label_dict(train_counts)}")
+        print(f"[mlp] test  {_counts_to_label_dict(test_counts)}")
 
     # Warn if some classes (from the full dataset) are missing in the training split
     full_idx = [label_to_idx[v] for v in full_counts.index if v in label_to_idx]
     missing_idx = [i for i in full_idx if i not in set(train_counts.index.tolist())]
     if missing_idx:
-        missing_labels = [idx_to_label[int(i)] for i in missing_idx]
-        print(f"[mi-race][WARN][mlp] Classes missing from training set: {missing_labels} -> cannot be predicted.")
+        missing_labels = [str(idx_to_label[int(i)]) for i in missing_idx]
+        print(f"[WARN][mlp] Classes missing from training set: {missing_labels} -> cannot be predicted.")
 
     hidden_layers = list(model_cfg.get("hidden_layers", [128, 128]))
     activation = str(model_cfg.get("activation", "relu"))
@@ -197,7 +199,7 @@ def run_mlp(
         total = 0
         correct = 0
         iterator = train_loader
-        show_bar = (tqdm is not None) and (log_every_epochs > 0) and (ep % log_every_epochs == 0)
+        show_bar = (not quiet) and (tqdm is not None) and (log_every_epochs > 0) and (ep % log_every_epochs == 0)
         if show_bar:
             iterator = tqdm(train_loader, desc=f"[mlp] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:
@@ -217,10 +219,10 @@ def run_mlp(
 
         avg_loss = total_loss / max(total, 1)
         train_acc = correct / max(total, 1)
-        if log_every_epochs > 0 and (ep % log_every_epochs == 0):
+        if (not quiet) and log_every_epochs > 0 and (ep % log_every_epochs == 0):
             test_loss, test_acc = _eval()
             print(
-                f"[mi-race][mlp] epoch {ep}/{epochs}  "
+                f"[mlp] epoch {ep}/{epochs}  "
                 f"train_loss={avg_loss:.4f} train_acc={train_acc:.4f}  "
                 f"test_loss={test_loss:.4f} test_acc={test_acc:.4f}"
             )

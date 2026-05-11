@@ -50,6 +50,33 @@ def _wrap_for_box(line: str, *, width: int) -> list[str]:
     )
 
 
+def render_confusion_matrix(
+    cm,
+    labels: Iterable,
+    *,
+    indent: int = 0,
+    cell_width: int = 7,
+) -> str:
+    """Render a confusion matrix as plain text, aligned by columns.
+
+    Used both for per-split inline display and inside the final result box.
+    ``indent`` is the number of leading spaces on every line. ``cell_width``
+    controls column width (large counts may need 8+).
+    """
+    pad = " " * indent
+    label_strs = [str(l) for l in labels]
+    label_w = max((len(s) for s in label_strs), default=1)
+
+    header = pad + " " * (label_w + 2) + "".join(
+        f"{s:>{cell_width}}" for s in label_strs
+    )
+    rows = [header]
+    for i, row_label in enumerate(label_strs):
+        cells = "".join(f"{int(cm[i][j]):>{cell_width}}" for j in range(len(label_strs)))
+        rows.append(f"{pad}{row_label:>{label_w}}  {cells}")
+    return "\n".join(rows)
+
+
 def render_box(
     lines: Iterable[str],
     *,
@@ -67,7 +94,10 @@ def render_box(
     title_text = f" {title} " if title else None
 
     measured = max((_visible_len(x) for x in raw_lines), default=0)
-    inner_width = max(measured, min_width, _visible_len(title_text) if title_text else 0)
+    # +2 accounts for the single-space padding on each side of every body line
+    # ("│ <content> │"). Without it, a line exactly min_width-1 long would
+    # overflow the right border by 1 column.
+    inner_width = max(measured + 2, min_width, _visible_len(title_text) if title_text else 0)
     if max_width is not None:
         inner_width = min(inner_width, max_width)
         inner_width = max(inner_width, _visible_len(title_text) if title_text else 0)

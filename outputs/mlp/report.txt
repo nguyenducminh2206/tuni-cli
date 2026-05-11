@@ -1,35 +1,33 @@
 
 === Model: mlp ===
-Classes: ['1.5']
-╭─────────────────── Results: mlp (test) ────────────────────╮
-│ Accuracy: 100.00%                                          │
-│ Macro F1:  100.00%                                         │
-│                                                            │
-│ MI (cm):   0.0000 bits                                     │
-│ NMI_sqrt:  0.0000                                          │
-│ KSG MI:    0.0000 bits                                     │
-│ Δ(MI-KSG): +0.0000 bits                                    │
-╰────────────────────────────────────────────────────────────╯
-╭───────────────── Confusion Matrix (test) ──────────────────╮
-│         1.5                                                │
-│     ------                                                 │
-│ 1.5 |   200                                                │
-╰────────────────────────────────────────────────────────────╯
+Classes: ['0.0', '0.5', '1.0', '1.5']
+Accuracy: 64.94%
+Macro F1: 64.37%
+
+Confusion Matrix (test)
+         0.0    0.5    1.0    1.5
+0.0      606    123     39     32
+0.5      190    432    106     72
+1.0       66    115    409    210
+1.5       25     49     95    631
 
 === Mutual Information (from confusion matrix) ===
-H(true): -0.0000 bits  |  H(pred): -0.0000 bits  |  Hjoint: -0.0000 bits
-I(true;pred): 0.0000 bits  |  NMI_sqrt: 0.0000  |  NMI_min: 0.0000  |  NMI_max: 0.0000
-H(true|pred): 0.0000 bits  |  H(pred|true): 0.0000 bits
+H(true): 2.0000 bits  |  H(pred): 1.9836 bits  |  Hjoint: 3.3819 bits
+I(true;pred): 0.6017 bits  |  NMI_sqrt: 0.3021  |  NMI_min: 0.3033  |  NMI_max: 0.3009
+H(true|pred): 1.3983 bits  |  H(pred|true): 1.3819 bits
 
 === KSG MI (labels;probs) ===
-KSG I(true;probs): 0.0000 bits
+KSG I(true;probs): 0.7055 bits
 
 === Classification Report (test) ===
               precision    recall  f1-score   support
 
-         1.5     1.0000    1.0000    1.0000       200
+         0.0     0.6832    0.7575    0.7184       800
+         0.5     0.6008    0.5400    0.5688       800
+         1.0     0.6302    0.5112    0.5645       800
+         1.5     0.6677    0.7887    0.7232       800
 
-    accuracy                         1.0000       200
-   macro avg     1.0000    1.0000    1.0000       200
-weighted avg     1.0000    1.0000    1.0000       200
+    accuracy                         0.6494      3200
+   macro avg     0.6455    0.6494    0.6437      3200
+weighted avg     0.6455    0.6494    0.6437      3200
 

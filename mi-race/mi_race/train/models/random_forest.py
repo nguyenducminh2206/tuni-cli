@@ -33,12 +33,14 @@ def run_random_forest(
     standardize: bool,  # Ignored for RF; kept for API parity
     random_state: int,
     stratify,
+    quiet: bool = False,
 ) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray]]:
-    """Train a RandomForest classifier and return (y_test, y_pred).
+    """Train a RandomForest classifier and return (y_test, y_pred, y_proba).
 
     Notes:
     - RandomForest does not require feature standardization; 'standardize' is ignored.
     - Supports common hyperparameters via model_cfg.
+    - ``quiet=True`` suppresses the per-call progress lines (used for per-split runs).
     """
     X = feature_df.to_numpy()
     y_norm = _normalize_labels_for_sklearn(y)
@@ -49,11 +51,11 @@ def run_random_forest(
         X, y_norm, test_size=test_size, random_state=random_state, stratify=stratify_norm
     )
 
-    train_counts = pd.Series(y_train).value_counts().sort_index()
-    test_counts = pd.Series(y_test).value_counts().sort_index()
-    print(f"[mi-race][rf] Total rows: {feature_df.shape[0]}")
-    print(f"[mi-race][rf] Class distribution (train): {train_counts.to_dict()}")
-    print(f"[mi-race][rf] Class distribution (test):  {test_counts.to_dict()}")
+    if not quiet:
+        train_counts = pd.Series(y_train).value_counts().sort_index()
+        test_counts = pd.Series(y_test).value_counts().sort_index()
+        print(f"[rf] {feature_df.shape[0]} rows  ·  train {dict((str(k), int(v)) for k, v in train_counts.items())}")
+        print(f"[rf] test  {dict((str(k), int(v)) for k, v in test_counts.items())}")
 
     # Hyperparameters
     n_estimators = int(model_cfg.get("n_estimators", 200))
@@ -89,10 +91,10 @@ def run_random_forest(
     )
 
     clf.fit(X_train, y_train)
-    learned_classes = getattr(clf, "classes_", None)
-    if learned_classes is not None:
-        learned_classes = list(learned_classes)
-        print(f"[mi-race][rf] Model learned classes: {learned_classes}")
+    if not quiet:
+        learned_classes = getattr(clf, "classes_", None)
+        if learned_classes is not None:
+            print(f"[rf] learned classes: {[str(c) for c in learned_classes]}")
 
     y_pred = clf.predict(X_test)
     # RF supports predict_proba when criterion is classification

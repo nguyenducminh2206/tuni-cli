@@ -23,9 +23,16 @@ dependencies = [
   "plotext"
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["mi_race*"]            
+include = ["mi_race*"]
 
 [project.scripts]
-mi-race = "mi_race.cli.main:main"   
+mi-race = "mi_race.cli.main:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
