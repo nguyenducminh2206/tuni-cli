@@ -1,0 +1,56 @@
+{
+    "data": {
+        "path": "temp/OU_concat.csv",
+        "x_cols": "time_point_1:time_point_11", 
+        "y_col": "mu",
+        "sequence_mode": "split",
+        "balance": true,
+        "split_by": "sigma"
+    },
+
+    "model": {
+        "mlp": {
+            "type": "mlp",
+            "hidden_layers": [128, 128],
+            "activation": "relu",
+            "optimizer": "adam",
+            "lr": 0.001,
+            "dropout": 0.0,
+            "batch_size": 64,
+            "epochs": 15
+        },
+        "cnn": {
+            "type": "cnn",
+            "channels": [16, 32],
+            "kernel_size": 5,
+            "pool": 2,
+            "fc": 128,
+            "epochs": 15,
+            "lr": 0.001,
+            "batch_size": 8,
+            "device": "auto"
+        },
+        "rnn": {
+            "sequence_col": "time_trace",
+            "max_len": 500,
+            "pad_value": 0.0,
+            "standardize": true,
+            "hidden_size": 128,
+            "num_layers": 1,
+            "bidirectional": true,
+            "batch_size": 8,
+            "epochs": 5,
+            "lr": 0.001,
+            "device": "auto"
+        }
+    },
+    "train": {
+        "test_size": 0.2,
+        "random_state": 42,
+        "standardize": true
+    },
+    "output": {
+        "dir": "outputs",
+        "show_report": true
+    }
+}
