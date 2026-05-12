@@ -15,15 +15,14 @@ CLAUDE.md
 PLAN.md
 .claude/
 
-# Project outputs (generated artifacts)
-# Ignore outputs under mi-race (CSV/JSON reports, etc.)
+# Project outputs and scratch directories — all local-only.
+outputs/
 mi-race/outputs/
 mi-race/processed_data/
+temp/
 
-# Root-level generated feature matrices
-outputs/processed_features.csv
-outputs/processed_features_rnn.csv
-outputs/*processed_features*.csv
+# macOS clutter
+.DS_Store
 
 # Distribution / packaging
 .Python
