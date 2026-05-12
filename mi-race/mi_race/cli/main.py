@@ -11,6 +11,7 @@ from mi_race.train.registry import SUPPORTED_MODELS
 from mi_race.data_preprocessing.concat import run_concat_csv_files
 from mi_race.data_preprocessing.filter_csv import run_filter_csv
 from mi_race.reporting.compare_models import run_compare
+from mi_race.encoder.dataset_gen import run_generate_data
 from mi_race.cli.ui import render_box
 
 
@@ -250,6 +251,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p_filter.add_argument("--column", help="column name to filter (skips prompt if used with --value)")
     p_filter.add_argument("--value", help="value to match (skips prompt if used with --column)")
     p_filter.set_defaults(func=run_filter_csv)
+
+    p_gen = sub.add_parser(
+        "generate-data",
+        help="run the SSA channel over a codebook and write a labeled CSV",
+    )
+    p_gen.add_argument(
+        "-c", "--config", default="config.json",
+        help="config json path (must include 'channel' block)",
+    )
+    p_gen.add_argument("--out", help="output csv path override")
+    p_gen.set_defaults(func=run_generate_data)
 
     return parser
 
