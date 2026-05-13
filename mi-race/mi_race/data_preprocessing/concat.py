@@ -82,8 +82,25 @@ def _concat_csvs_in_folder(
     # Validate that all CSV files have the same schema (same columns)
     ref_cols = _validate_same_schema(paths)
 
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        tqdm = None
+
+    from mi_race.cli.ui import progress_disabled
+
+    iterator = paths
+    if tqdm is not None and len(paths) > 5:
+        iterator = tqdm(
+            paths,
+            desc=f"[mi-race] concat {folder.name}",
+            unit="file",
+            disable=progress_disabled(),
+            leave=False,
+        )
+
     frames: list[pd.DataFrame] = []
-    for p in paths:
+    for p in iterator:
         df = pd.read_csv(p)
         # Allow different column order as long as the set matches
         if list(df.columns) != ref_cols:

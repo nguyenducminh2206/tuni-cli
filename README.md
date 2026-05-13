@@ -67,7 +67,7 @@ Run `mi-race` with no arguments to drop into an interactive shell with the same 
 | `mi-race concat -c CONFIG [--recursive] [--pattern *.csv] [--out FILE]` | Concatenate CSVs from a folder into one file. Auto-detects nested subfolders. |
 | `mi-race filter -c CONFIG [--file F] [--column C --value V] [--out FILE]` | Interactive row filter (single column equals value) over a concatenated CSV. |
 
-Global flags: `-v`/`--version`, `--no-banner` (or env `MI_RACE_NO_LOGO=1`) to suppress the startup banner. **`--no-banner` must come before the subcommand.**
+Global flags: `-v`/`--version`. The startup banner and tqdm progress bars auto-suppress when stdout isn't a TTY (CI, pipes, captured output), so scripts stay clean without needing a flag.
 
 ---
 

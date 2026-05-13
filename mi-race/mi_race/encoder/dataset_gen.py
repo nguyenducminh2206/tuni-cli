@@ -96,6 +96,23 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
         f"obs_compartment={obs} runs_per_symbol={runs} symbols={sorted(codebook.keys())}"
     )
 
+    try:
+        from tqdm.auto import tqdm
+    except ImportError:
+        tqdm = None
+    from mi_race.cli.ui import progress_disabled
+
+    total_runs = len(codebook) * runs
+    pbar = None
+    if tqdm is not None:
+        pbar = tqdm(
+            total=total_runs,
+            desc="[mi-race] SSA runs",
+            unit="run",
+            disable=progress_disabled(),
+            leave=False,
+        )
+
     rows = []
     n_steps = None
     for sid, schedule in sorted(codebook.items()):
@@ -117,6 +134,11 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
                 for ti in range(n_steps):
                     row[f"comp{obs}_{ti}"] = int(trace[ti])
                 rows.append(row)
+            if pbar is not None:
+                pbar.update(1)
+
+    if pbar is not None:
+        pbar.close()
 
     df = pd.DataFrame(rows)
     out_csv.parent.mkdir(parents=True, exist_ok=True)

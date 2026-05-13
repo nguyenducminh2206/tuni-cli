@@ -232,6 +232,8 @@ def _export_rnn_features(
 
 def run_cmd(args):
     start_time = datetime.now()
+    dry_run = bool(getattr(args, "dry_run", False))
+
     # Load config
     cfg_path = Path(args.config)
     if not cfg_path.exists():
@@ -242,8 +244,9 @@ def run_cmd(args):
     # Output directory (used for pre-run summary and saving artifacts)
     out_cfg = cfg.get("output", {})
     base_out = Path(out_cfg.get("dir", "outputs"))
-    dp_ensure_outdir(base_out)
-    _sanitize_summary_models(base_out)
+    if not dry_run:
+        dp_ensure_outdir(base_out)
+        _sanitize_summary_models(base_out)
 
     # Data section
     if "data" not in cfg:
@@ -278,10 +281,12 @@ def run_cmd(args):
                 source_stem = p.stem
 
         filtered_path = default_filtered_temp_path(source_stem, filter_expr)
-        df.to_csv(filtered_path, index=False)
+        if not dry_run:
+            df.to_csv(filtered_path, index=False)
         print(f"[mi-race] Applied config filter: {filter_expr}")
         print(f"[mi-race] Filtered rows: {after_n:,} (from {before_n:,})")
-        print(f"[mi-race] Wrote: {filtered_path}")
+        if not dry_run:
+            print(f"[mi-race] Wrote: {filtered_path}")
 
     # Target validation
     y_col = data_cfg.get("y_col")
@@ -363,7 +368,8 @@ def run_cmd(args):
     if spec.needs_features:
         feature_df, resolved_feature_cols = build_features_from_config(df, cfg)
         feature_summary = _compact_feature_summary(resolved_feature_cols)
-        feature_df.to_csv(base_out / "processed_features.csv", index=False)
+        if not dry_run:
+            feature_df.to_csv(base_out / "processed_features.csv", index=False)
 
     # ---------------- Setup box (single consolidated panel) ----------------
     data_path_disp = data_cfg.get("path", "—")
@@ -389,6 +395,10 @@ def run_cmd(args):
         f"Output    {base_out}/",
     ]
     print(render_box(setup_lines, title="mi-race", min_width=76))
+
+    if dry_run:
+        print("\n[mi-race] --dry-run: config validated, features resolved. No training run, no files written.")
+        return
 
     # ---------------- Training ----------------
     print(f"\nTraining {mtype}")

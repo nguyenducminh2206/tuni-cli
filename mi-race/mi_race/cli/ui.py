@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
 import textwrap
+
+
+def progress_disabled() -> bool:
+    """Return True when progress bars should be suppressed.
+
+    Triggered when stdout is not a TTY (CI, piped output, captured streams).
+    Callers pass the return value as ``disable=`` to ``tqdm`` so progress
+    bars don't pollute log files or break pytest output capturing.
+    """
+    isatty = getattr(sys.stdout, "isatty", None)
+    if not callable(isatty):
+        return True
+    try:
+        return not isatty()
+    except (ValueError, OSError):
+        return True
 
 
 @dataclass(frozen=True)

@@ -188,7 +188,8 @@ def run_cnn(feature_df: pd.DataFrame,
         correct = 0
         iterator = train_loader
         # Only show tqdm progress on selected epochs to reduce noise
-        show_bar = (not quiet) and (tqdm is not None) and (ep % log_every_epochs == 0)
+        from mi_race.cli.ui import progress_disabled
+        show_bar = (not quiet) and (tqdm is not None) and (ep % log_every_epochs == 0) and (not progress_disabled())
         if show_bar:
             iterator = tqdm(train_loader, desc=f"[cnn] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:

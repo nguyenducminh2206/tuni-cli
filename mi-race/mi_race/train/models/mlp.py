@@ -199,7 +199,8 @@ def run_mlp(
         total = 0
         correct = 0
         iterator = train_loader
-        show_bar = (not quiet) and (tqdm is not None) and (log_every_epochs > 0) and (ep % log_every_epochs == 0)
+        from mi_race.cli.ui import progress_disabled
+        show_bar = (not quiet) and (tqdm is not None) and (log_every_epochs > 0) and (ep % log_every_epochs == 0) and (not progress_disabled())
         if show_bar:
             iterator = tqdm(train_loader, desc=f"[mlp] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:

@@ -25,9 +25,14 @@ def _pkg_version() -> str:
 
 
 def _banner_suppressed(args: argparse.Namespace) -> bool:
-    if getattr(args, "no_banner", False):
+    """Suppress the ASCII banner when stdout isn't a TTY (scripts, CI, pipes)."""
+    isatty = getattr(sys.stdout, "isatty", None)
+    if not callable(isatty):
         return True
-    return os.environ.get("MI_RACE_NO_LOGO", "").lower() in ("1", "true", "yes")
+    try:
+        return not isatty()
+    except (ValueError, OSError):
+        return True
 
 
 def _print_banner(args: argparse.Namespace) -> None:
@@ -95,8 +100,44 @@ def _rewrite_legacy_argv(argv: List[str]) -> List[str]:
     return out
 
 
+def _enable_shell_history() -> None:
+    """Wire up readline-backed history and line editing for the interactive shell.
+
+    Up-arrow recall, Ctrl-R reverse search, and Emacs-style line editing all
+    come from importing ``readline`` before the first ``input()`` call. History
+    persists across sessions in ``~/.mi_race_history``.
+
+    On Windows the stdlib lacks ``readline``; install ``pyreadline3`` to get
+    the same behavior. If neither is available we silently fall back to the
+    plain ``input()`` behavior (no history, no editing).
+    """
+    try:
+        import readline  # noqa: F401 — import has the side effect of enabling editing
+    except ImportError:
+        return
+
+    history_path = os.path.expanduser("~/.mi_race_history")
+    try:
+        readline.read_history_file(history_path)
+    except (FileNotFoundError, OSError):
+        pass
+    readline.set_history_length(1000)
+
+    import atexit
+
+    def _save_history() -> None:
+        try:
+            readline.write_history_file(history_path)
+        except OSError:
+            pass
+
+    atexit.register(_save_history)
+
+
 def _run_shell(parser: argparse.ArgumentParser, *, startup_args: argparse.Namespace) -> None:
     """Interactive shell that reuses the existing argparse parser and handlers."""
+    _enable_shell_history()
+
     print("Hello from mi-race! Pick a command below.\n")
     parser.print_help()
     print("\nType 'help' to see this again, 'exit' to quit.")
@@ -199,11 +240,6 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-v", "--version", action="version", version=f"mi-race {_pkg_version()}"
     )
-    parser.add_argument(
-        "--no-banner",
-        action="store_true",
-        help="suppress the startup ASCII banner (same as MI_RACE_NO_LOGO=1)",
-    )
 
     sub = parser.add_subparsers(dest="cmd")
 
@@ -214,12 +250,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"model selection ({', '.join(repr(m) for m in SUPPORTED_MODELS)}).",
     )
     p_run.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate config and resolve features without training or writing outputs",
+    )
     p_run.set_defaults(func=run_cmd)
 
     p_run_all = sub.add_parser(
         "run-all", help="train/evaluate all supported models using the same config"
     )
     p_run_all.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_run_all.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="validate config for every model without training or writing outputs",
+    )
     p_run_all.set_defaults(func=_run_all)
 
     p_cmp = sub.add_parser(

@@ -233,7 +233,8 @@ def run_rnn(
         total = 0
         correct = 0
         iterator = train_loader
-        if (not quiet) and (tqdm is not None):
+        from mi_race.cli.ui import progress_disabled
+        if (not quiet) and (tqdm is not None) and (not progress_disabled()):
             iterator = tqdm(train_loader, desc=f"[rnn] epoch {ep}/{epochs}", leave=False)
         for xb, yb in iterator:
             xb = xb.to(device)

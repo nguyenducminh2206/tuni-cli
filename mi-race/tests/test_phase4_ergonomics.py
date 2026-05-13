@@ -11,44 +11,54 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# --no-banner flag
+# Banner suppression (auto non-TTY detection)
 # ---------------------------------------------------------------------------
 
 
-def test_banner_prints_by_default(monkeypatch, capsys):
-    monkeypatch.delenv("MI_RACE_NO_LOGO", raising=False)
+def test_banner_suppressed_when_stdout_is_not_tty(capsys):
+    """Pytest's captured stdout is non-TTY → banner skipped."""
     from mi_race.cli.main import _print_banner
 
-    args = argparse.Namespace(no_banner=False, config="config.json")
+    args = argparse.Namespace(config="config.json")
     _print_banner(args)
-    out = capsys.readouterr().out
-    assert "███" in out, "expected ASCII banner in output"
+    assert capsys.readouterr().out == "", "banner should auto-suppress on non-TTY"
 
 
-def test_no_banner_flag_suppresses_banner(monkeypatch, capsys):
-    monkeypatch.delenv("MI_RACE_NO_LOGO", raising=False)
-    from mi_race.cli.main import _print_banner
+def test_banner_suppression_honors_isatty(monkeypatch):
+    """_banner_suppressed returns False when stdout claims to be a TTY."""
+    from mi_race.cli.main import _banner_suppressed
 
-    args = argparse.Namespace(no_banner=True, config="config.json")
-    _print_banner(args)
-    assert capsys.readouterr().out == ""
+    class _FakeTTY:
+        def isatty(self):
+            return True
 
-
-def test_env_var_still_suppresses_banner(monkeypatch, capsys):
-    monkeypatch.setenv("MI_RACE_NO_LOGO", "1")
-    from mi_race.cli.main import _print_banner
-
-    args = argparse.Namespace(no_banner=False, config="config.json")
-    _print_banner(args)
-    assert capsys.readouterr().out == ""
+    monkeypatch.setattr("sys.stdout", _FakeTTY())
+    assert _banner_suppressed(argparse.Namespace(config="config.json")) is False
 
 
-def test_no_banner_flag_appears_in_parser():
+def test_no_banner_flag_is_removed():
+    """The --no-banner CLI flag was retired."""
     from mi_race.cli.main import _build_parser
 
     parser = _build_parser()
     actions = {tuple(a.option_strings) for a in parser._actions}
-    assert any("--no-banner" in opts for opts in actions)
+    assert not any("--no-banner" in opts for opts in actions)
+
+
+def test_no_logo_env_var_no_longer_suppresses(monkeypatch):
+    """MI_RACE_NO_LOGO was removed; only the TTY check controls banner now."""
+    from mi_race.cli.main import _banner_suppressed
+
+    monkeypatch.setenv("MI_RACE_NO_LOGO", "1")
+
+    class _FakeTTY:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr("sys.stdout", _FakeTTY())
+    assert _banner_suppressed(argparse.Namespace(config="config.json")) is False, (
+        "MI_RACE_NO_LOGO should no longer have any effect"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -226,9 +236,8 @@ def test_legacy_form_round_trips_through_main(monkeypatch, synthetic_config):
 
     monkeypatch.setattr(main_mod, "run_concat_csv_files", fake_concat)
 
-    # Rebuild parser so it picks up the monkeypatched handler.
-    monkeypatch.delenv("MI_RACE_NO_LOGO", raising=False)
-    main_mod.main(["--no-banner", "concat", "csv-files", "-c", str(synthetic_config)])
+    # Pytest's captured stdout is already non-TTY, so the banner auto-suppresses.
+    main_mod.main(["concat", "csv-files", "-c", str(synthetic_config)])
     assert called.get("config") == str(synthetic_config)
 
 
@@ -238,5 +247,5 @@ def test_modern_concat_invocation_calls_handler(monkeypatch, synthetic_config):
     called: dict = {}
     monkeypatch.setattr(main_mod, "run_concat_csv_files", lambda args: called.setdefault("ok", True))
 
-    main_mod.main(["--no-banner", "concat", "-c", str(synthetic_config)])
+    main_mod.main(["concat", "-c", str(synthetic_config)])
     assert called.get("ok") is True
