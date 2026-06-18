@@ -48,3 +48,30 @@ def codebook_from_config(channel_cfg: dict) -> dict[int, list[tuple[float, int]]
         else:
             out[sid] = [(float(t), int(a)) for (t, a) in events]
     return out
+
+
+def symbols_as_vectors(channel_cfg: dict) -> dict[int, list[int]]:
+    """Return ``{symbol_id: dense length-n_slots vector}`` regardless of stored format.
+
+    Dense symbols are returned as-is (padded to ``n_slots``). Legacy sparse
+    ``[[t, amount]]`` symbols are rasterized onto the slot grid via ``slot_dt``.
+    """
+    raw = channel_cfg.get("symbols", {})
+    slot_dt = float(channel_cfg.get("slot_dt", 0.1))
+    n_slots = int(channel_cfg.get("n_slots", 0))
+
+    out: dict[int, list[int]] = {}
+    for k, events in raw.items():
+        sid = int(k)
+        if _is_dense_vector(events):
+            vec = [int(round(float(x))) for x in events]
+        else:
+            sched = [(float(t), int(a)) for (t, a) in events]
+            width = n_slots or (max((round(t / slot_dt) for t, _a in sched), default=0) + 1)
+            vec = [0] * width
+            for t, a in sched:
+                vec[round(t / slot_dt)] = a
+        if n_slots and len(vec) < n_slots:
+            vec = vec + [0] * (n_slots - len(vec))
+        out[sid] = vec
+    return out

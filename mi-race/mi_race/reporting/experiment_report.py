@@ -29,7 +29,7 @@ import pandas as pd
 from sklearn.metrics import accuracy_score, confusion_matrix
 
 from ..analysis import info_from_confusion_matrix
-from ..encoder.codebook import codebook_from_config
+from ..encoder.codebook import symbols_as_vectors
 from ..train.data_prep import load_df_from_cfg, build_features_from_config
 from ..train.registry import MODEL_REGISTRY, SUPPORTED_MODELS
 
@@ -62,7 +62,9 @@ class ExperimentResult:
     class_labels: list
     times: np.ndarray               # time axis for received signals
     avg_received: dict              # {comp_prefix: ndarray (n_symbols, n_steps)}
-    codebook: dict = field(default_factory=dict)  # {sid: [(t, a), ...]}
+    symbol_vectors: dict = field(default_factory=dict)  # {sid: length-n_slots release vector}
+    slot_dt: float = 0.1            # seconds per slot
+    budget: int = 0                 # molecules per symbol (y-scale for the bars)
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +143,14 @@ def run_baseline_experiment(cfg: dict, model_name: str) -> ExperimentResult:
 
     avg, times = _avg_received_by_symbol(df, y_col, cfg)
 
-    codebook: dict = {}
-    if "channel" in cfg and isinstance(cfg["channel"], dict) and cfg["channel"].get("symbols"):
-        codebook = codebook_from_config(cfg["channel"])
+    channel = cfg.get("channel", {}) if isinstance(cfg.get("channel"), dict) else {}
+    symbol_vectors: dict = {}
+    if channel.get("symbols"):
+        symbol_vectors = symbols_as_vectors(channel)
+    slot_dt = float(channel.get("slot_dt", 0.1))
+    budget = int(channel.get("budget", 0)) or (
+        max((sum(v) for v in symbol_vectors.values()), default=0) if symbol_vectors else 0
+    )
 
     return ExperimentResult(
         label="Baseline (hand-picked)",
@@ -154,7 +161,9 @@ def run_baseline_experiment(cfg: dict, model_name: str) -> ExperimentResult:
         class_labels=labels,
         times=times,
         avg_received=avg,
-        codebook=codebook,
+        symbol_vectors=symbol_vectors,
+        slot_dt=slot_dt,
+        budget=budget,
     )
 
 
@@ -202,31 +211,35 @@ def _grid(n: int):
 
 
 def plot_clean_messages(result: ExperimentResult, T: float) -> Optional[str]:
-    """Per-symbol release schedule (the 'clean message'). None if no codebook."""
-    if not result.codebook:
+    """Per-symbol release vector (the 'clean message') as bars over slots.
+
+    Each symbol is a length-``n_slots`` vector of molecule counts; we draw one
+    bar per slot so the dense representation is visible directly. ``None`` if
+    there is no codebook.
+    """
+    if not result.symbol_vectors:
         return None
     import matplotlib.pyplot as plt
 
-    sids = sorted(result.codebook.keys())
+    sids = sorted(result.symbol_vectors.keys())
+    n_slots = max(len(result.symbol_vectors[s]) for s in sids)
+    y_top = result.budget if result.budget else max(
+        (max(result.symbol_vectors[s]) for s in sids), default=1
+    )
     rows, cols = _grid(len(sids))
     with plt.rc_context(_PLOT_STYLE):
         fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 2.1 * rows), squeeze=False)
         flat = axes.flatten()
+        slots = range(n_slots)
         for ax, sid in zip(flat, sids):
-            pulses = result.codebook[sid]
-            if pulses:
-                ts = [t for t, _a in pulses]
-                amps = [a for _t, a in pulses]
-                marker, stem, base = ax.stem(ts, amps, basefmt=" ")
-                stem.set_color(_ACCENT)
-                stem.set_linewidth(2.0)
-                marker.set_color(_ACCENT)
-                marker.set_markersize(6)
-            ax.set_xlim(-0.02 * T, T * 1.02)
-            ax.set_ylim(bottom=0)
+            vec = result.symbol_vectors[sid]
+            ax.bar(list(slots), list(vec) + [0] * (n_slots - len(vec)),
+                   width=0.85, color=_ACCENT)
+            ax.set_xlim(-0.6, n_slots - 0.4)
+            ax.set_ylim(0, y_top * 1.1)
             ax.set_title(f"Symbol {sid}")
-            ax.set_xlabel("Release time [s]")
-            ax.set_ylabel("Amount")
+            ax.set_xlabel(f"Slot (0–{n_slots - 1}, Δt={result.slot_dt:g}s)")
+            ax.set_ylabel("Molecules")
         for ax in flat[len(sids):]:
             ax.axis("off")
         fig.tight_layout()
@@ -490,7 +503,7 @@ def _save_bundle(results: list[ExperimentResult], cfg: dict, out_dir: Path) -> N
                 "nmi_sqrt": r.nmi_sqrt,
                 "class_labels": [str(c) for c in r.class_labels],
                 "confusion": r.confusion.tolist(),
-                "codebook": {str(k): v for k, v in r.codebook.items()},
+                "symbols": {str(k): v for k, v in r.symbol_vectors.items()},
             }
             for r in results
         ],
