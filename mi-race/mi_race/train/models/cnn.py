@@ -37,30 +37,56 @@ def run_cnn(feature_df: pd.DataFrame,
             "[mi-race] CNN requires split sequence columns. Set data.sequence_mode='split' and include at least one sequence column in data.x_cols."
         )
 
+    def _sorted_cols(prefix: str) -> list[str]:
+        return [name for _idx, name in sorted(groups[prefix], key=lambda t: t[0])]
+
+    # Decide which group(s) to use and build X_seq with shape
+    # (samples, n_channels, n_steps). Single-group runs use n_channels=1.
     seq_prefix = model_cfg.get("sequence_prefix")
-    chosen_prefix = None
+    multi_channel = bool(model_cfg.get("multi_channel", False))
+
     if seq_prefix is not None:
+        # Explicit single group (backward compatible).
         if seq_prefix not in groups:
             raise SystemExit(
                 f"[mi-race] sequence_prefix='{seq_prefix}' not found. Available split groups: {sorted(groups.keys())}"
             )
-        chosen_prefix = seq_prefix
+        channel_prefixes = [seq_prefix]
+    elif multi_channel:
+        # Stack every detected group as one input channel (Task B).
+        channel_prefixes = sorted(groups.keys())
+    elif len(groups) == 1:
+        channel_prefixes = [next(iter(groups))]
     else:
-        if len(groups) == 1:
-            chosen_prefix = next(iter(groups))
-        else:
-            raise SystemExit(
-                f"[mi-race] Multiple split sequence groups found {sorted(groups.keys())}. Specify model.cnn.sequence_prefix to choose one."
-            )
+        raise SystemExit(
+            f"[mi-race] Multiple split sequence groups found {sorted(groups.keys())}. "
+            "Set model.cnn.multi_channel=true to use all as channels, or "
+            "model.cnn.sequence_prefix to choose one."
+        )
 
-    seq_cols_sorted = [name for idx, name in sorted(groups[chosen_prefix], key=lambda t: t[0])]
+    # Build a (samples, n_steps) array per channel, then stack on axis 1.
+    per_channel = [feature_df[_sorted_cols(p)].to_numpy(dtype=float) for p in channel_prefixes]
+    step_counts = {arr.shape[1] for arr in per_channel}
+    if len(step_counts) != 1:
+        raise SystemExit(
+            f"[mi-race] CNN channels have unequal step counts {sorted(step_counts)} "
+            f"for groups {channel_prefixes}; cannot stack."
+        )
+    X_seq = np.stack(per_channel, axis=1)  # (samples, C, n_steps)
+    n_channels = X_seq.shape[1]
+    n_steps = X_seq.shape[2]
+
     if not quiet:
-        print(f"[cnn] using split sequence group '{chosen_prefix}' ({len(seq_cols_sorted)} steps)")
-    X_seq = feature_df[seq_cols_sorted].to_numpy(dtype=float)
+        if n_channels == 1:
+            print(f"[cnn] using split sequence group '{channel_prefixes[0]}' ({n_steps} steps)")
+        else:
+            print(f"[cnn] using {n_channels} channels {channel_prefixes} ({n_steps} steps each)")
 
     if standardize:
+        # Fit one scaler across all channels (flatten C*n_steps), then restore shape.
         scaler = StandardScaler()
-        X_seq = scaler.fit_transform(X_seq)
+        s = X_seq.shape[0]
+        X_seq = scaler.fit_transform(X_seq.reshape(s, -1)).reshape(s, n_channels, n_steps)
 
     test_size = float(train_cfg.get("test_size", 0.2))
     X_train, X_test, y_train, y_test = train_test_split(
@@ -82,13 +108,14 @@ def run_cnn(feature_df: pd.DataFrame,
     y_test_idx  = np.array([label_to_idx[v] for v in y_test], dtype=np.int64)
 
     class SeqDataset(Dataset):
-        def __init__(self, X2d: np.ndarray, y1d: np.ndarray):
-            self.X = X2d.astype(np.float32)
+        def __init__(self, X3d: np.ndarray, y1d: np.ndarray):
+            # X3d: (samples, n_channels, n_steps)
+            self.X = X3d.astype(np.float32)
             self.y = y1d.astype(np.int64)
         def __len__(self):
             return self.X.shape[0]
         def __getitem__(self, idx: int):
-            x = torch.from_numpy(self.X[idx][None, :])
+            x = torch.from_numpy(self.X[idx])  # (n_channels, n_steps)
             y = torch.tensor(self.y[idx], dtype=torch.long)
             return x, y
 
@@ -108,7 +135,7 @@ def run_cnn(feature_df: pd.DataFrame,
         train_loader = DataLoader(SeqDataset(X_train, y_train_idx), batch_size=batch_size, shuffle=True)
     test_loader  = DataLoader(SeqDataset(X_test,  y_test_idx),  batch_size=batch_size, shuffle=False)
 
-    in_channels = 1
+    in_channels = n_channels
     channels = list(model_cfg.get("channels", [16, 32]))
     kernel_size = int(model_cfg.get("kernel_size", 5))
     pool_size = int(model_cfg.get("pool", 2))
@@ -125,7 +152,7 @@ def run_cnn(feature_df: pd.DataFrame,
             self.relu2 = nn.ReLU()
             self.pool2 = nn.MaxPool1d(pool_size)
             with torch.no_grad():
-                dummy = torch.zeros(1, 1, L)
+                dummy = torch.zeros(1, in_channels, L)
                 h = self._forward_features(dummy)
                 flat = h.view(1, -1).shape[1]
             self.fc1 = nn.Linear(flat, fc_hidden)
@@ -143,7 +170,7 @@ def run_cnn(feature_df: pd.DataFrame,
             x = self.relu_fc(self.fc1(x))
             return self.out(x)
 
-    L = X_seq.shape[1]
+    L = n_steps
     device_cfg = str(model_cfg.get("device", "auto")).lower()
     if device_cfg == "cpu":
         device = torch.device("cpu")
