@@ -1,4 +1,8 @@
+# Generated datasets + diagnostic plots (regenerate with `mi-race generate-data`)
+data/*.csv
+data/*.png
 data/example_dataset/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -20,6 +24,7 @@ outputs/
 mi-race/outputs/
 mi-race/processed_data/
 temp/
+experiments/
 
 # macOS clutter
 .DS_Store
