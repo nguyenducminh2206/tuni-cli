@@ -1,29 +1,28 @@
 {
   "channel": {
-    "L": 5,
+    "L": 8,
     "S": 1.0,
     "D": 2.0,
     "dt": 0.01,
     "T": 2.0,
-    "observed_compartment": 0,
-    "save_all_compartments": false,
     "runs_per_symbol": 300,
     "seed": 12345,
     "symbols": {
-      "0": [[0.0, 100]],
-      "1": [[0.5, 100]],
-      "2": [[1.0, 100]]
-    }
+      "0": [100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "1": [0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      "2": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    },
+    "n_slots": 20,
+    "slot_dt": 0.1,
+    "budget": 100
   },
-
   "data": {
     "path": "data/encoder.csv",
-    "x_cols": "comp0_0:comp0_200",
+    "x_cols": "comp3_0:comp3_200",
     "y_col": "symbol",
     "sequence_mode": "split",
     "balance": false
   },
-
   "model": {
     "cnn": {
       "type": "cnn",
@@ -47,13 +46,11 @@
       "epochs": 15
     }
   },
-
   "train": {
     "test_size": 0.2,
     "random_state": 42,
     "standardize": true
   },
-
   "output": {
     "dir": "outputs",
     "show_report": true
