@@ -12,6 +12,8 @@ from mi_race.data_preprocessing.concat import run_concat_csv_files
 from mi_race.data_preprocessing.filter_csv import run_filter_csv
 from mi_race.reporting.compare_models import run_compare
 from mi_race.encoder.dataset_gen import run_generate_data
+from mi_race.encoder.symbols import run_symbols
+from mi_race.reporting.experiment_report import run_report
 from mi_race.cli.ui import render_box
 
 
@@ -308,6 +310,36 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_gen.add_argument("--out", help="output csv path override")
     p_gen.set_defaults(func=run_generate_data)
+
+    p_sym = sub.add_parser(
+        "symbols",
+        help="build a codebook of release vectors and write it into the config",
+    )
+    p_sym.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_sym.add_argument(
+        "--type", choices=["time", "two-pulse", "uniform", "manual"],
+        help="template (omit for interactive mode)",
+    )
+    p_sym.add_argument("--n", type=int, help="number of symbols")
+    p_sym.add_argument("--slots", type=int, help="slots per symbol vector")
+    p_sym.add_argument("--budget", type=int, help="total molecules per symbol")
+    p_sym.add_argument("--slot-dt", dest="slot_dt", type=float, help="seconds per slot")
+    p_sym.add_argument("--yes", action="store_true", help="skip the write confirmation")
+    p_sym.set_defaults(func=run_symbols)
+
+    p_report = sub.add_parser(
+        "report",
+        help="train the decoder and render an HTML experiment report (before/after)",
+    )
+    p_report.add_argument("-c", "--config", default="config.json", help="config json path")
+    p_report.add_argument(
+        "--model", choices=list(SUPPORTED_MODELS), default="cnn",
+        help="decoder model to evaluate (default: cnn)",
+    )
+    p_report.add_argument("--name", help="experiment name (default: config stem)")
+    p_report.add_argument("--out", help="output directory override (default: experiments/<name>)")
+    p_report.add_argument("--open", action="store_true", help="open the report in your default browser when done")
+    p_report.set_defaults(func=run_report)
 
     return parser
 

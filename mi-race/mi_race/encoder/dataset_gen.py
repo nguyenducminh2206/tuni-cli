@@ -62,13 +62,12 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
     Read `channel` block from cfg, run SSA `runs_per_symbol` times per symbol,
     write a wide CSV with one row per run.
 
-    Columns:
-      symbol, comp{k}_0, comp{k}_1, ..., comp{k}_{n_steps}
-    where k = channel.observed_compartment (default = L-1).
+    The full tube is always recorded — columns are
+    ``symbol, comp0_0..comp0_{n_steps}, comp1_0..., ..., comp{L-1}_*``. The
+    decoder decides which compartments to observe via ``data.x_cols``; generation
+    is observation-agnostic, so one dataset serves every observation experiment.
 
-    Optionally also writes all compartments if channel.save_all_compartments is true.
-
-    Plots one sample trajectory per symbol alongside the CSV unless
+    Plots one diagnostic trajectory alongside the CSV unless
     ``channel.make_plots`` is set to ``false``.
     """
     channel = cfg["channel"]
@@ -78,22 +77,15 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
     dt = float(channel["dt"])
     T = float(channel["T"])
     runs = int(channel["runs_per_symbol"])
-    obs = int(channel.get("observed_compartment", L - 1))
     seed = int(channel.get("seed", 12345))
-    save_all = bool(channel.get("save_all_compartments", False))
     make_plots = bool(channel.get("make_plots", True))
-
-    if obs < 0 or obs >= L:
-        raise SystemExit(
-            f"[mi-race] channel.observed_compartment={obs} out of range [0, {L - 1}]"
-        )
 
     codebook = codebook_from_config(channel)
     rng_master = np.random.default_rng(seed)
 
     print(
         f"[mi-race] generate-data  L={L} T={T} dt={dt} "
-        f"obs_compartment={obs} runs_per_symbol={runs} symbols={sorted(codebook.keys())}"
+        f"runs_per_symbol={runs} symbols={sorted(codebook.keys())}"
     )
 
     try:
@@ -122,18 +114,11 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
             times, X = simulate_ssa_with_schedule(schedule, L, S, D, dt, T, rng)
             if n_steps is None:
                 n_steps = X.shape[0]
-            if save_all:
-                row: dict = {"symbol": sid}
-                for k in range(L):
-                    for ti in range(n_steps):
-                        row[f"comp{k}_{ti}"] = int(X[ti, k])
-                rows.append(row)
-            else:
-                row = {"symbol": sid}
-                trace = X[:, obs]
+            row: dict = {"symbol": sid}
+            for k in range(L):
                 for ti in range(n_steps):
-                    row[f"comp{obs}_{ti}"] = int(trace[ti])
-                rows.append(row)
+                    row[f"comp{k}_{ti}"] = int(X[ti, k])
+            rows.append(row)
             if pbar is not None:
                 pbar.update(1)
 
@@ -171,15 +156,5 @@ def run_generate_data(args) -> None:
     out_path = Path(args.out) if getattr(args, "out", None) else Path(
         cfg.get("data", {}).get("path", "data/encoder_dataset.csv")
     )
-
-    channel = cfg["channel"]
-    L = int(channel.get("L", 0))
-    obs = int(channel.get("observed_compartment", L - 1))
-    x_cols = cfg.get("data", {}).get("x_cols", "")
-    if isinstance(x_cols, str) and x_cols and f"comp{obs}_" not in x_cols:
-        print(
-            f"[mi-race][WARN] data.x_cols ({x_cols!r}) does not reference "
-            f"comp{obs}_* — training may fail to find feature columns."
-        )
 
     generate_dataset(cfg, out_path)
