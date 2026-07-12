@@ -39,6 +39,7 @@ def simulate_ssa_with_schedule(
     dt: float,
     T: float,
     rng: np.random.Generator,
+    absorbing: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     SSA on a 1D lattice with TIME-DEPENDENT input.
@@ -47,6 +48,13 @@ def simulate_ssa_with_schedule(
     ``a_i`` molecules are injected into compartment 0 (additively — multiple
     pulses superpose in the same tube). The schedule does not need to be
     sorted. Times outside ``[0, T]`` are dropped with a warning.
+
+    Boundaries:
+      - The source end (compartment 0) always reflects.
+      - The far end (compartment ``L-1``) **reflects** by default, or **absorbs**
+        when ``absorbing=True`` — a molecule at the far end can leave the system
+        at the diffusion rate, so total mass drains over time and each symbol's
+        signal returns toward zero (it "finishes").
 
     Returns ``(times, X)``: ``times`` is a length ``n_steps + 1`` linspace from
     0 to ``T``, ``X`` is an ``(n_steps + 1, L)`` integer array of compartment
@@ -97,6 +105,10 @@ def simulate_ssa_with_schedule(
             if i < L - 1:
                 propensities.append(d * x[i])
                 events.append((i, i + 1))
+            elif absorbing:
+                # far boundary absorbs: the molecule leaves the system (dst = -1)
+                propensities.append(d * x[i])
+                events.append((i, -1))
 
         a0 = float(np.sum(propensities))
 
@@ -139,7 +151,9 @@ def simulate_ssa_with_schedule(
 
         src, dst = chosen
         x[src] -= 1
-        x[dst] += 1
+        if dst >= 0:
+            x[dst] += 1
+        # dst == -1 → absorbed at the far boundary; the molecule leaves the system
         t = t_next
 
     while record_idx <= n_steps:

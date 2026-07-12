@@ -30,7 +30,7 @@ from sklearn.metrics import accuracy_score, confusion_matrix
 
 from ..analysis import info_from_confusion_matrix
 from ..encoder.codebook import symbols_as_vectors
-from ..train.data_prep import load_df_from_cfg, build_features_from_config
+from ..train.data_prep import load_df_from_cfg, build_features_from_config, warn_if_stale_dataset
 from ..train.registry import MODEL_REGISTRY, SUPPORTED_MODELS
 
 
@@ -536,6 +536,7 @@ def run_report(args) -> None:
         cfg = json.load(f)
     if "data" not in cfg:
         raise SystemExit("[mi-race] report: config is missing a 'data' section.")
+    warn_if_stale_dataset(cfg_path, cfg)
 
     model_name = getattr(args, "model", None) or "cnn"
     if model_name not in SUPPORTED_MODELS:

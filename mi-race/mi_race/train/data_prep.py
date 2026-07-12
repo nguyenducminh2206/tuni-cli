@@ -15,6 +15,32 @@ def ensure_outdir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def warn_if_stale_dataset(config_path, cfg: dict) -> bool:
+    """Warn when the config was edited more recently than its generated dataset.
+
+    Only fires for encoder-style configs (those with a ``channel`` block, whose
+    ``generate-data`` produces ``data.path``). This catches the common mistake of
+    changing channel settings but forgetting to re-run ``generate-data`` before
+    ``run``/``report``. Returns True if a warning was printed.
+    """
+    if not isinstance(cfg, dict) or "channel" not in cfg:
+        return False
+    data_path = cfg.get("data", {}).get("path")
+    if not data_path:
+        return False
+    cfg_p, data_p = Path(config_path), Path(data_path)
+    if not (cfg_p.exists() and data_p.exists() and data_p.is_file()):
+        return False
+    if cfg_p.stat().st_mtime > data_p.stat().st_mtime:
+        print(
+            f"[mi-race][WARN] {cfg_p} is newer than {data_p}. "
+            f"If you changed the 'channel' block, re-run "
+            f"`mi-race generate-data -c {cfg_p}` to refresh the dataset."
+        )
+        return True
+    return False
+
+
 def load_df_from_cfg(data_cfg: dict) -> pd.DataFrame:
     """
     Load dataframe according to config.

@@ -20,6 +20,7 @@ from .data_prep import (
     load_df_from_cfg as dp_load_df_from_cfg,
     build_features_from_config,
     ensure_outdir as dp_ensure_outdir,
+    warn_if_stale_dataset,
 )
 from datetime import datetime
 from ..reporting.report import (
@@ -252,6 +253,7 @@ def run_cmd(args):
     if "data" not in cfg:
         raise SystemExit("[mi-race] Missing 'data' section in config.")
     data_cfg = cfg["data"]
+    warn_if_stale_dataset(args.config, cfg)
 
     # Load dataset
     df = dp_load_df_from_cfg(data_cfg)

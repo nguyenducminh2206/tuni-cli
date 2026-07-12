@@ -43,10 +43,23 @@ def _ssa(schedule, cfg, rng):
     )
 
 
+def _ssa_absorbing(schedule, cfg, rng):
+    """SSA diffusion with an absorbing receiver at the far end (mass drains → symbols finish)."""
+    return simulate_ssa_with_schedule(
+        schedule,
+        int(cfg["L"]), float(cfg["S"]), float(cfg["D"]),
+        float(cfg["dt"]), float(cfg["T"]), rng,
+        absorbing=True,
+    )
+
+
 # type -> (function, one-line description, param names shown by `mi-race channels`)
 _BUILTINS: dict[str, tuple[ChannelFn, str, list[str]]] = {
     "ssa": (_ssa, "exact SSA diffusion, reflecting walls (mass conserved)",
             ["L", "S", "D", "dt", "T"]),
+    "ssa_absorbing": (_ssa_absorbing,
+                      "SSA diffusion, absorbing receiver at far end (mass drains, symbols finish)",
+                      ["L", "S", "D", "dt", "T"]),
 }
 
 CHANNEL_REGISTRY: dict[str, ChannelFn] = {name: fn for name, (fn, _d, _p) in _BUILTINS.items()}

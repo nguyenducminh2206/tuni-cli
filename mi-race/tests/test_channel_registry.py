@@ -40,6 +40,26 @@ def test_unknown_channel_type_errors():
         build_channel({"type": "does_not_exist", "L": 4})
 
 
+def test_absorbing_is_registered():
+    assert "ssa_absorbing" in CHANNEL_REGISTRY
+    assert "ssa_absorbing" in [n for n, _d, _p in list_channels()]
+
+
+def test_absorbing_drains_mass_but_reflecting_conserves_it():
+    # Long enough for molecules to reach the far end and be absorbed.
+    cfg = {"L": 5, "S": 1.0, "D": 3.0, "dt": 0.02, "T": 4.0}
+    schedule = [(0.0, 200)]
+
+    _t, X_ref = build_channel({**cfg, "type": "ssa"})(schedule, np.random.default_rng(0))
+    _t, X_abs = build_channel({**cfg, "type": "ssa_absorbing"})(schedule, np.random.default_rng(0))
+
+    # Reflecting conserves total mass at every timestep.
+    assert X_ref.sum(axis=1).min() == 200 and X_ref.sum(axis=1).max() == 200
+    # Absorbing starts at 200 but drains well below it by the end.
+    assert X_abs.sum(axis=1)[0] == 200
+    assert X_abs.sum(axis=1)[-1] < 200
+
+
 def test_default_type_is_ssa():
     channel = build_channel({"L": 4, "S": 1.0, "D": 2.0, "dt": 0.1, "T": 1.0})
     times, X = channel([(0.0, 10)], np.random.default_rng(0))
