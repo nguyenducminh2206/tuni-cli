@@ -11,7 +11,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-from mi_race.channel.simulation import simulate_ssa_with_schedule
+from mi_race.channel.registry import build_channel
 from mi_race.encoder.codebook import codebook_from_config
 
 
@@ -70,21 +70,19 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
     Plots one diagnostic trajectory alongside the CSV unless
     ``channel.make_plots`` is set to ``false``.
     """
-    channel = cfg["channel"]
-    L = int(channel["L"])
-    S = float(channel["S"])
-    D = float(channel["D"])
-    dt = float(channel["dt"])
-    T = float(channel["T"])
-    runs = int(channel["runs_per_symbol"])
-    seed = int(channel.get("seed", 12345))
-    make_plots = bool(channel.get("make_plots", True))
+    channel_cfg = cfg["channel"]
+    L = int(channel_cfg["L"])
+    runs = int(channel_cfg["runs_per_symbol"])
+    seed = int(channel_cfg.get("seed", 12345))
+    make_plots = bool(channel_cfg.get("make_plots", True))
+    ctype = str(channel_cfg.get("type", "ssa"))
 
-    codebook = codebook_from_config(channel)
+    channel = build_channel(channel_cfg)   # pluggable: ssa / ssa_absorbing / custom
+    codebook = codebook_from_config(channel_cfg)
     rng_master = np.random.default_rng(seed)
 
     print(
-        f"[mi-race] generate-data  L={L} T={T} dt={dt} "
+        f"[mi-race] generate-data  channel={ctype} L={L} "
         f"runs_per_symbol={runs} symbols={sorted(codebook.keys())}"
     )
 
@@ -111,7 +109,7 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
         for _ in range(runs):
             run_seed = int(rng_master.integers(0, 2**32 - 1))
             rng = np.random.default_rng(run_seed)
-            times, X = simulate_ssa_with_schedule(schedule, L, S, D, dt, T, rng)
+            times, X = channel(schedule, rng)
             if n_steps is None:
                 n_steps = X.shape[0]
             row: dict = {"symbol": sid}
@@ -137,7 +135,7 @@ def generate_dataset(cfg: dict, out_csv: Path) -> Path:
         for sched in codebook.values():
             merged_schedule.extend(sched)
         plot_rng = np.random.default_rng(seed + 1)
-        times, X = simulate_ssa_with_schedule(merged_schedule, L, S, D, dt, T, plot_rng)
+        times, X = channel(merged_schedule, plot_rng)
         _save_channel_signal_plot(times, X, merged_schedule, out_csv, L)
 
     return out_csv

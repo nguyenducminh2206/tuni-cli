@@ -13,6 +13,7 @@ from mi_race.data_preprocessing.filter_csv import run_filter_csv
 from mi_race.reporting.compare_models import run_compare
 from mi_race.encoder.dataset_gen import run_generate_data
 from mi_race.encoder.symbols import run_symbols
+from mi_race.channel.registry import run_channels
 from mi_race.reporting.experiment_report import run_report
 from mi_race.cli.ui import render_box
 
@@ -326,6 +327,13 @@ def _build_parser() -> argparse.ArgumentParser:
     p_sym.add_argument("--slot-dt", dest="slot_dt", type=float, help="seconds per slot")
     p_sym.add_argument("--yes", action="store_true", help="skip the write confirmation")
     p_sym.set_defaults(func=run_symbols)
+
+    p_ch = sub.add_parser(
+        "channels",
+        help="list built-in channels, or scaffold a custom one with --new",
+    )
+    p_ch.add_argument("--new", metavar="FILE", help="write a custom-channel template to FILE")
+    p_ch.set_defaults(func=run_channels)
 
     p_report = sub.add_parser(
         "report",
