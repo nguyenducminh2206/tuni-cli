@@ -82,7 +82,7 @@ A single JSON file drives everything. Sections are independent — `generate-dat
 
 ```json
 "channel": {
-  "type": "ssa",                    // which channel: "ssa" (built-in) or "custom"
+  "type": "ssa",                    // "ssa", "ssa_absorbing", or "custom" — see `mi-race channels`
   "L": 10,                          // # compartments in the 1D lattice
   "S": 1.0,                         // compartment size [micron]
   "D": 2.0,                         // diffusion coefficient [micron^2/s]
