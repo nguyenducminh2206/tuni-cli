@@ -64,6 +64,7 @@ Prefer terminal-only output? `mi-race run --model cnn -c configs/encoder.json` t
 | `mi-race channels [--new FILE]`                                                                         | List built-in channels and their parameters.`--new` scaffolds a ready-to-edit custom-channel template.                                                                              |
 | `mi-race generate-data -c CONFIG [--out FILE]`                                                          | Run the configured channel over`CONFIG.channel.symbols` and write a labeled CSV (all compartments).                                                                                 |
 | `mi-race report -c CONFIG [--model M] [--name N] [--out DIR] [--open]`                                  | Train the decoder and render an HTML experiment report (MI, accuracy, confusion matrix, message/received figures).`--open` opens it in the browser.                                 |
+| `mi-race optimize -c CONFIG [--steps N] [--quanta K] [--init random\|baseline] [--model M] [--open]`       | Learn a better codebook: train the encoder jointly with a decoder through the channel, then score baseline vs learned codebook and write a before/after report. See [Training the encoder](#training-the-encoder). |
 | `mi-race run --model {mlp\|cnn\|rnn\|rf} -c CONFIG`                                                        | Train one model into`outputs/`. If `data.split_by` names a column, additionally retrain per unique value of it.                                                                   |
 | `mi-race run-all -c CONFIG`                                                                             | Run every supported model sequentially. Failures in one model don't abort the rest. Prints a summary table.                                                                           |
 | `mi-race compare [--split PREFIX]`                                                                      | Read`outputs/summary_models.csv` and print two terminal bar charts: overall accuracy and accuracy-vs-split.                                                                         |
@@ -205,6 +206,64 @@ mi-race report        -c configs/mine.json --open
 
 ---
 
+## Training the encoder
+
+`mi-race symbols` gives you a hand-picked codebook. `mi-race optimize` **learns** one: it trains the encoder and a decoder together through the channel so that the symbols end up as distinguishable as possible after the channel's noise.
+
+```bash
+mi-race optimize -c configs/encoder_hard.json --open
+```
+
+What it does:
+
+1. **Trains** for `steps` steps. Each step, the encoder picks release slots for every symbol (`per_symbol` transmissions each), the channel simulates them, and a small CNN decoder reads the compartments named in `data.x_cols` and guesses the symbol.
+2. **Learns by trial and error.** The channel is a stochastic simulation, so gradients can't flow through it. The encoder is trained with REINFORCE instead: its reward is the decoder's log-probability of the true symbol. The average reward is a variational **lower bound on the mutual information**, so the encoder is pushed toward codebooks that carry more information.
+3. **Scores both codebooks the same way.** The starting codebook (from the config) and the learned one each get a fresh simulated dataset and a freshly trained decoder (`--model`, default `cnn`). The only difference between the two numbers is the codebook itself.
+4. **Writes a before/after report.**
+
+Outputs in `experiments/<config>_optimized/`:
+
+| File | Contents |
+|------|----------|
+| `report.html` | before/after table, training curves, learned policy heatmap, and the usual message/received/confusion figures for both codebooks |
+| `optimized_config.json` | your config with the learned codebook, ready for `generate-data` / `report` |
+| `result.json` | metrics, confusion matrices, both codebooks, full training history |
+| `baseline.csv`, `optimized.csv` | the evaluation datasets |
+
+Example (`configs/encoder_hard.json`: 8 crowded single-pulse symbols, decoder reads compartment 3 only):
+
+| | baseline | learned |
+|---|---|---|
+| accuracy | 38.5% | 74.8% |
+| MI | 1.01 bits | 2.05 bits (max 3) |
+
+The encoder learned to spread its pulses across the whole window, and to use the latest slot as a "late / silent" symbol.
+
+Tuning lives in an optional `optimize` block in the config (CLI flags override it):
+
+```json
+"optimize": {
+  "steps": 400,          // training steps
+  "per_symbol": 8,       // transmissions per symbol per step
+  "quanta": 1,           // packets per symbol: 1 = one pulse; >1 lets a symbol split its budget across slots
+  "init": "random",      // "random" (recommended) or "baseline" (start near the config's codebook)
+  "lr_encoder": 0.03,
+  "lr_decoder": 0.002,
+  "entropy_coef": 0.03,  // keeps the encoder exploring early on
+  "log_every": 20,
+  "eval_runs_per_symbol": null,  // runs per symbol when scoring (null = channel.runs_per_symbol)
+  "seed": 0
+}
+```
+
+Notes:
+- The symbol count, `n_slots` and `budget` come from `channel.symbols`, so build a starting codebook with `mi-race symbols` first. Every learned symbol keeps exactly `budget` molecules.
+- Slots that would release after `T` are never used.
+- `init: "baseline"` tends to stay stuck near a crowded starting codebook, because all symbols explore the same empty slots and none of them can win one. `random` avoids that.
+- Cost is dominated by the simulator. With `ssa` on the hard config, 400 steps plus scoring take about a minute.
+
+---
+
 ## What gets saved
 
 Each `mi-race run` writes:
@@ -238,6 +297,10 @@ mi-race generate-data        →   mi_race/encoder/codebook.py      (symbol vect
                                   mi_race/channel/registry.py      (build_channel: ssa / custom)
                                   mi_race/channel/simulation.py    (SSA engine)
                                   → data/<name>.csv  +  <name>_signal.png
+
+mi-race optimize             →   mi_race/encoder/optimize.py      (encoder policy + CNN decoder, REINFORCE loop)
+                                  mi_race/reporting/experiment_report.py (evaluate_codebook, before/after report)
+                                  → experiments/<name>_optimized/
 
 mi-race report               →   mi_race/reporting/experiment_report.py
                                   (train decoder → MI/accuracy/figures → experiments/<name>/report.html)
