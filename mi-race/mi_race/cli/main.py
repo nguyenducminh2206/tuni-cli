@@ -15,6 +15,7 @@ from mi_race.encoder.dataset_gen import run_generate_data
 from mi_race.encoder.symbols import run_symbols
 from mi_race.channel.registry import run_channels
 from mi_race.reporting.experiment_report import run_report
+from mi_race.encoder.optimize import run_optimize
 from mi_race.cli.ui import render_box
 
 
@@ -348,6 +349,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("--out", help="output directory override (default: experiments/<name>)")
     p_report.add_argument("--open", action="store_true", help="open the report in your default browser when done")
     p_report.set_defaults(func=run_report)
+
+    p_opt = sub.add_parser(
+        "optimize",
+        help="train the encoder jointly with a decoder through the channel; report before/after",
+    )
+    p_opt.add_argument("-c", "--config", default="config.json", help="config json path (channel + data)")
+    p_opt.add_argument("--steps", type=int, help="training steps (default 400)")
+    p_opt.add_argument("--quanta", type=int, help="packets per symbol; 1 = single pulse (default 1)")
+    p_opt.add_argument("--per-symbol", dest="per_symbol", type=int,
+                       help="transmissions per symbol per step (default 8)")
+    p_opt.add_argument("--init", choices=["random", "baseline"], help="encoder start point (default random)")
+    p_opt.add_argument("--seed", type=int, help="training seed (default 0)")
+    p_opt.add_argument("--model", choices=list(SUPPORTED_MODELS), default="cnn",
+                       help="decoder used to score both codebooks (default: cnn)")
+    p_opt.add_argument("--eval-runs", dest="eval_runs", type=int,
+                       help="runs per symbol when scoring (default: channel.runs_per_symbol)")
+    p_opt.add_argument("--name", help="experiment name (default: <config stem>_optimized)")
+    p_opt.add_argument("--out", help="output directory override (default: experiments/<name>)")
+    p_opt.add_argument("--open", action="store_true", help="open the report in your default browser when done")
+    p_opt.set_defaults(func=run_optimize)
 
     return parser
 
