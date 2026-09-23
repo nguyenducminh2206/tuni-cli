@@ -16,6 +16,7 @@ writes to its own ``experiments/<name>/`` bundle so results are not clobbered.
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import re
 from dataclasses import dataclass, field
@@ -105,7 +106,9 @@ def _avg_received_by_symbol(df: pd.DataFrame, y_col: str, cfg: dict):
     return avg, times
 
 
-def run_baseline_experiment(cfg: dict, model_name: str) -> ExperimentResult:
+def run_baseline_experiment(
+    cfg: dict, model_name: str, label: str = "Baseline (hand-picked)"
+) -> ExperimentResult:
     """Train the decoder once on the configured dataset and collect metrics."""
     data_cfg = cfg["data"]
     df = load_df_from_cfg(data_cfg)
@@ -153,7 +156,7 @@ def run_baseline_experiment(cfg: dict, model_name: str) -> ExperimentResult:
     )
 
     return ExperimentResult(
-        label="Baseline (hand-picked)",
+        label=label,
         accuracy=acc,
         mi_bits=float(info["I"]),
         nmi_sqrt=float(info["NMI_sqrt"]),
@@ -165,6 +168,33 @@ def run_baseline_experiment(cfg: dict, model_name: str) -> ExperimentResult:
         slot_dt=slot_dt,
         budget=budget,
     )
+
+
+def evaluate_codebook(
+    cfg: dict,
+    symbol_vectors: dict,
+    model_name: str,
+    csv_path: Path,
+    label: str,
+    runs_per_symbol: Optional[int] = None,
+) -> ExperimentResult:
+    """Score a codebook with the standard protocol: fresh dataset, fresh decoder.
+
+    Simulates ``symbol_vectors`` through ``cfg``'s channel into ``csv_path``,
+    then trains the configured ``model_name`` decoder on it exactly as
+    ``mi-race report`` does. Using the same protocol for two codebooks makes
+    their MI/accuracy directly comparable.
+    """
+    from ..encoder.dataset_gen import generate_dataset
+
+    c = copy.deepcopy(cfg)
+    ch = c["channel"]
+    ch["symbols"] = {str(k): [int(x) for x in v] for k, v in sorted(symbol_vectors.items())}
+    if runs_per_symbol:
+        ch["runs_per_symbol"] = int(runs_per_symbol)
+    c["data"] = {**c.get("data", {}), "path": str(csv_path)}
+    generate_dataset(c, Path(csv_path))
+    return run_baseline_experiment(c, model_name, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +324,78 @@ def plot_confusion(result: ExperimentResult) -> str:
         return _fig_to_b64(fig)
 
 
+def plot_training_curve(history: dict) -> Optional[str]:
+    """Encoder-training curves: decoder accuracy, information, policy entropy."""
+    if not history or not history.get("step"):
+        return None
+    import matplotlib.pyplot as plt
+
+    steps = history["step"]
+    n = len(history.get("symbol_ids", [])) or 2
+    max_bits = float(history.get("max_bits", 1.0))
+    valid = sum(history.get("valid_slots", [])) or 2
+    with plt.rc_context(_PLOT_STYLE):
+        fig, axes = plt.subplots(1, 3, figsize=(15, 3.6))
+
+        ax = axes[0]
+        ax.plot(steps, [a * 100 for a in history["acc"]], color=_ACCENT, linewidth=1.8)
+        ax.axhline(100.0 / n, color="#999999", linestyle=":", linewidth=1, label="chance")
+        ax.set_title("Decoder accuracy (fresh transmissions)")
+        ax.set_xlabel("Training step")
+        ax.set_ylabel("Accuracy [%]")
+        ax.set_ylim(0, 100)
+        ax.legend(fontsize=8, frameon=False)
+
+        ax = axes[1]
+        ax.plot(steps, history["mi_cm"], color=_ACCENT, linewidth=1.8, label="MI from confusion matrix")
+        ax.plot(steps, history["mi_ba"], color=_PALETTE[1], linewidth=1.4, linestyle="--",
+                label="variational lower bound")
+        ax.axhline(max_bits, color="#999999", linestyle=":", linewidth=1, label=f"max = log₂{n}")
+        ax.set_title("Information carried")
+        ax.set_xlabel("Training step")
+        ax.set_ylabel("Bits")
+        ax.set_ylim(0, max_bits * 1.08)
+        ax.legend(fontsize=8, frameon=False)
+
+        ax = axes[2]
+        ax.plot(steps, history["entropy_bits"], color=_PALETTE[2], linewidth=1.8)
+        ax.axhline(np.log2(valid), color="#999999", linestyle=":", linewidth=1, label="uniform (max)")
+        ax.set_title("Encoder policy entropy")
+        ax.set_xlabel("Training step")
+        ax.set_ylabel("Bits per symbol")
+        ax.set_ylim(bottom=0)
+        ax.legend(fontsize=8, frameon=False)
+
+        fig.tight_layout()
+        return _fig_to_b64(fig)
+
+
+def plot_policy(history: dict) -> Optional[str]:
+    """Heatmap of the final encoder policy: P(release slot | symbol)."""
+    probs = history.get("policy") if history else None
+    if not probs:
+        return None
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+
+    arr = np.asarray(probs)
+    n_symbols, n_slots = arr.shape
+    slot_dt = float(history.get("slot_dt", 0.1))
+    with plt.rc_context(_PLOT_STYLE):
+        fig, ax = plt.subplots(figsize=(min(14, 1.2 + 0.55 * n_slots), 0.9 + 0.42 * n_symbols))
+        sns.heatmap(
+            arr, cmap="Blues", vmin=0, vmax=1, ax=ax, cbar=True,
+            xticklabels=[f"{k}\n{k * slot_dt:g}s" for k in range(n_slots)],
+            yticklabels=[f"S{s}" for s in history.get("symbol_ids", range(n_symbols))],
+            annot=n_slots <= 24, fmt=".2f", annot_kws={"size": 7},
+        )
+        ax.grid(False)
+        ax.set_xlabel("Release slot (time)")
+        ax.set_ylabel("Symbol")
+        fig.tight_layout()
+        return _fig_to_b64(fig)
+
+
 # ---------------------------------------------------------------------------
 # HTML assembly
 # ---------------------------------------------------------------------------
@@ -360,6 +462,8 @@ table.cmp th:first-child, table.cmp td:first-child { text-align: left; color: va
 table.cmp thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 table.cmp .delta-pos { color: #2e7d4f; font-weight: 600; }
 table.cmp .delta-neg { color: #c0392b; font-weight: 600; }
+p.note { color: var(--muted); font-size: .88rem; margin: -.3rem 0 1rem; }
+p.note code { background: #eef2f7; padding: .05rem .35rem; border-radius: 4px; }
 footer.report { color: var(--muted); font-size: .78rem; text-align: center;
   padding-top: 1.4rem; border-top: 1px solid var(--line); }
 """
@@ -424,8 +528,38 @@ def _comparison_panel(results: list[ExperimentResult]) -> str:
     return f"""
   <section class="panel">
     <h2>Before / after</h2>
+    <p class="note">Both codebooks are scored the same way: a fresh simulated dataset
+    and a freshly trained decoder of the same type, so the difference comes from the
+    codebook alone.</p>
     <table class="cmp"><thead><tr><th>Metric</th>{headers}</tr></thead>
     <tbody>{body}</tbody></table>
+  </section>"""
+
+
+def _training_panel(history: Optional[dict], cfg: dict) -> str:
+    """Encoder-training section (learning curves + learned policy). Empty if no history."""
+    if not history or not history.get("step"):
+        return ""
+    opts = history.get("options", {})
+    n = len(history.get("symbol_ids", []))
+    batch = n * int(opts.get("per_symbol", 0))
+    observed = ", ".join(f"comp {k}" for k in history.get("observed", []))
+    ctype = cfg.get("channel", {}).get("type", "ssa")
+    summary = (
+        f"The encoder was trained for <b>{history['step'][-1]}</b> steps of <b>{batch}</b> "
+        f"simulated transmissions each through the <code>{ctype}</code> channel, while a decoder "
+        f"learned to read <b>{observed}</b>. The channel is a stochastic simulation, so the encoder "
+        f"learns by trial and error (REINFORCE): its reward is the decoder's log-probability of the "
+        f"true symbol, whose average is a variational lower bound on the mutual information."
+    )
+    curve = plot_training_curve(history)
+    policy = plot_policy(history)
+    return f"""
+  <section class="panel">
+    <h2>Encoder training</h2>
+    <p class="note">{summary}</p>
+    {_figure_block(curve, "Training curves — measured on each step's fresh transmissions, before the decoder learns from them")}
+    {_figure_block(policy, "Learned encoder policy — probability that each symbol releases in each slot; the darkest cell per row is the learned codebook")}
   </section>"""
 
 
@@ -434,6 +568,7 @@ def render_html(
     cfg: dict,
     out_html: Path,
     title: str,
+    history: Optional[dict] = None,
 ) -> Path:
     channel = cfg.get("channel", {})
     T = float(channel.get("T", 1.0))
@@ -443,12 +578,16 @@ def render_html(
     meta_items: list[tuple[str, str]] = [("Symbols (N)", str(n_classes))]
     if channel:
         for key, label in [
-            ("L", "Compartments (L)"), ("T", "Duration T [s]"), ("dt", "Timestep dt [s]"),
-            ("D", "Diffusion D"), ("observed_compartment", "Observed compartment"),
-            ("runs_per_symbol", "Runs / symbol"),
+            ("type", "Channel"), ("L", "Compartments (L)"), ("T", "Duration T [s]"),
+            ("dt", "Timestep dt [s]"), ("D", "Diffusion D"),
+            ("n_slots", "Slots / symbol"), ("slot_dt", "Slot Δt [s]"),
+            ("budget", "Budget (molecules)"), ("runs_per_symbol", "Runs / symbol"),
         ]:
             if key in channel:
                 meta_items.append((label, str(channel[key])))
+    x_cols = cfg.get("data", {}).get("x_cols")
+    if x_cols:
+        meta_items.append(("Decoder observes", x_cols if isinstance(x_cols, str) else ", ".join(x_cols)))
     meta_html = "".join(
         f'<div class="meta-item"><span class="k">{k}</span><span class="v">{v}</span></div>'
         for k, v in meta_items
@@ -456,6 +595,7 @@ def render_html(
 
     sections = "\n".join(_result_section(r, T) for r in results)
     comparison = _comparison_panel(results)
+    training = _training_panel(history, cfg)
     generated = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     html = f"""<!DOCTYPE html>
@@ -479,6 +619,7 @@ def render_html(
       <div class="meta-grid">{meta_html}</div>
     </section>
 {comparison}
+{training}
 {sections}
 
     <footer class="report">Generated by <strong>mi-race</strong> · encoder &rarr; SSA channel &rarr; decoder</footer>
@@ -491,8 +632,10 @@ def render_html(
     return out_html
 
 
-def _save_bundle(results: list[ExperimentResult], cfg: dict, out_dir: Path) -> None:
-    """Persist scalar metrics + confusion matrices + codebook as JSON."""
+def _save_bundle(
+    results: list[ExperimentResult], cfg: dict, out_dir: Path, extra: Optional[dict] = None
+) -> None:
+    """Persist scalar metrics + confusion matrices + codebook (+ ``extra``) as JSON."""
     payload = {
         "channel": cfg.get("channel", {}),
         "results": [
@@ -508,6 +651,9 @@ def _save_bundle(results: list[ExperimentResult], cfg: dict, out_dir: Path) -> N
             for r in results
         ],
     }
+    if extra:
+        payload.update(extra)
+    out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
