@@ -40,7 +40,7 @@ from mi_race.encoder.symbols import _round_preserving_sum, normalize_to_budget
 OPTIMIZE_DEFAULTS: dict = {
     "steps": 400,            # training steps
     "per_symbol": 8,         # transmissions per symbol per step (batch = N * per_symbol)
-    "quanta": 1,             # packets per symbol (1 = single pulse)
+    "quanta": 3,             # packets per symbol (1 = single pulse)
     "lr_encoder": 0.03,      # Adam learning rate for the encoder logits
     "lr_decoder": 0.002,     # Adam learning rate for the decoder CNN
     "entropy_coef": 0.03,    # entropy bonus — keeps the encoder exploring early on
