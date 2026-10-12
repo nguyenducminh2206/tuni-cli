@@ -25,8 +25,24 @@
     "test_fraction": 0.2
   },
   "decoders": {
-    "random_forest": { "n_estimators": 200 },
-    "mlp": { "hidden": [128, 128], "epochs": 30, "lr": 0.001, "batch_size": 64 },
-    "cnn": { "channels": [16, 32], "kernel_size": 5, "epochs": 30, "lr": 0.001, "batch_size": 64 }
+    "random_forest": {
+      "n_estimators": 200
+    },
+    "mlp": {
+      "hidden_layers": [128, 128],
+      "epochs": 30,
+      "lr": 0.001,
+      "batch_size": 64
+    },
+    "cnn": {
+      "channels": [16, 32],
+      "kernel_size": 5,
+      "epochs": 30,
+      "lr": 0.001,
+      "batch_size": 64
+    }
+  },
+  "output": {
+    "dir": "outputs"
   }
 }
