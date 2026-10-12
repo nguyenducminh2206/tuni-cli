@@ -18,19 +18,19 @@ symbols (config or prompt) → encoder (release schedule) → SSA channel
 
 ## Notation
 
-| Name | Meaning |
-| --- | --- |
-| U | transmitted symbol, uniform on {0, …, N-1} |
-| Û | decoder's prediction |
-| Y | receiver signal (`rx_0 … rx_M`) |
-| L | positions: compartments 0 … L-2, receiver at L-1 |
-| h | compartment width |
-| D | diffusion coefficient |
-| λ = D / h² | jump rate of one molecule to each neighbour |
-| dt, T | snapshot interval and duration; M = T / dt; t_m = m · dt |
-| n_slots, slot_dt | number of release slots and their spacing |
-| B | budget: molecules per symbol |
-| pθ(u \| y) | decoder's probability of symbol u given signal y |
+| Name             | Meaning                                                   |
+| ---------------- | --------------------------------------------------------- |
+| U                | transmitted symbol, uniform on {0, …, N-1}               |
+| Û               | decoder's prediction                                      |
+| Y                | receiver signal (`rx_0 … rx_M`)                        |
+| L                | positions: compartments 0 … L-2, receiver at L-1         |
+| h                | compartment width                                         |
+| D                | diffusion coefficient                                     |
+| λ = D / h²     | jump rate of one molecule to each neighbour               |
+| dt, T            | snapshot interval and duration; M = T / dt; t_m = m · dt |
+| n_slots, slot_dt | number of release slots and their spacing                 |
+| B                | budget: molecules per symbol                              |
+| pθ(u\| y)       | decoder's probability of symbol u given signal y          |
 
 ## Encoder (release vectors)
 
@@ -151,3 +151,11 @@ Learning the encoder (joint training), possibly with a pre-training stage.
 - Seed torch for every model.
 - Releases at exactly T were silently dropped, so slots must satisfy t < T.
 - Validate configs before simulating.
+
+## CLI look (kept from legacy)
+
+- Every message starts with `[mi-race]`; warnings with `[mi-race] warning:`, errors with `[mi-race] error:`.
+- The prefix is added in one place (`ui.py`). Core code raises plain messages.
+- ASCII banner and version box at start, hidden when output is not a terminal.
+- Results in boxes; the confusion matrix as an aligned text table.
+- Progress only in a terminal; every line under 80 columns.
