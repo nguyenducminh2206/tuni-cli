@@ -30,6 +30,7 @@ class ChannelConfig:
         """M = T/dt, so the receiver signal is rx_0, rx_M"""
         return round(self.T / self.dt)
 
+
 @dataclass(frozen=True)
 class EncoderConfig:
     """The encoder section: when each symbol releases its molecules"""
@@ -43,12 +44,14 @@ class EncoderConfig:
         """N, the number of symbols (one release vector each)"""  
         return len(self.symbols)
 
+
 @dataclass(frozen=True)
 class DataConfig:
     """The data section: where the dataset goes and how it is split"""
     path: str                                   # where the simulated dataset is saved
     runs_per_symbol: int = RECOMMENDED_RUNS     # simulations per symbol
     test_fraction: float = 0.2                  # share of runs kept asidde for testing
+
 
 @dataclass(frozen=True)
 class OutputConfig:
