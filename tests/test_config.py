@@ -27,7 +27,7 @@ def test_n_symbols_counts_the_vectors():
 def test_symbols_cannot_be_changed():
     encoder = EncoderConfig(n_slots=3, slot_dt=0.1, budget=50, symbols=((50, 0, 0), (0, 0, 50)))
     with pytest.raises(TypeError):
-        encoder.symbols[0][1] == 7
+        encoder.symbols[0][1] = 7
 
 
 # 3c: DataConfig and OutputConfig
