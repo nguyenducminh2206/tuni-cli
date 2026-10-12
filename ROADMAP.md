@@ -48,19 +48,19 @@ Don't start the next part until all four boxes of the current one are ticked.
 - [X] Code
 - [X] Try it
 - [X] Test: jump rate, n_intervals, float rounding, can't be changed
-- [ ] Commit
+- [X] Commit
 
 **3b — `EncoderConfig`** (tuples, `n_symbols`)
 
-- [ ] Code
-- [ ] Try it: tuples vs lists
-- [ ] Test: n_symbols, symbols can't be changed
-- [ ] Commit
+- [X] Code
+- [X] Try it: tuples vs lists
+- [X] Test: n_symbols, symbols can't be changed
+- [X] Commit
 
 **3c — `DataConfig` and `OutputConfig`** (default values)
 
-- [ ] Edit `configs/example.json`: rename `hidden` → `hidden_layers`, add `"output": {"dir": "outputs"}`
-- [ ] Code
+- [X] Edit `configs/example.json`: rename `hidden` → `hidden_layers`, add `"output": {"dir": "outputs"}`
+- [X] Code
 - [ ] Try it
 - [ ] Test: defaults are 300 runs, 0.2 test fraction, `outputs`
 - [ ] Commit
