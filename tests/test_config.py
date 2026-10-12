@@ -2,7 +2,7 @@
 
 import dataclasses
 import pytest
-from mi_race.config import ChannelConfig, EncoderConfig
+from mi_race.config import ChannelConfig, EncoderConfig, DataConfig, OutputConfig
 
 # 3a: ChannelConfig
 def test_jump_rate_is_D_over_h_squared():
@@ -28,3 +28,17 @@ def test_symbols_cannot_be_changed():
     encoder = EncoderConfig(n_slots=3, slot_dt=0.1, budget=50, symbols=((50, 0, 0), (0, 0, 50)))
     with pytest.raises(TypeError):
         encoder.symbols[0][1] == 7
+
+
+# 3c: DataConfig and OutputConfig
+def test_data_defaults_match_the_spec():
+    data = DataConfig(path="data/example.csv")
+    assert data.runs_per_symbol == 300
+    assert data.test_fraction == 0.2
+
+def test_data_path_is_required():
+    with pytest.raises(TypeError):
+        DataConfig()
+
+def test_output_dir_defaults_to_outputs():
+    assert OutputConfig().dir == "outputs"
