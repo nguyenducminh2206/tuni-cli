@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "seed": 12345,
+  "channel": {
+    "L": 4,
+    "h": 1.0,
+    "D": 2.0,
+    "dt": 0.01,
+    "T": 2.0
+  },
+  "encoder": {
+    "n_slots": 10,
+    "slot_dt": 0.1,
+    "budget": 50,
+    "symbols": [
+      [50, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 50, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 50, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 50]
+    ]
+  },
+  "data": {
+    "path": "data/example.csv",
+    "runs_per_symbol": 300,
+    "test_fraction": 0.2
+  },
+  "decoders": {
+    "random_forest": { "n_estimators": 200 },
+    "mlp": { "hidden": [128, 128], "epochs": 30, "lr": 0.001, "batch_size": 64 },
+    "cnn": { "channels": [16, 32], "kernel_size": 5, "epochs": 30, "lr": 0.001, "batch_size": 64 }
+  }
+}
