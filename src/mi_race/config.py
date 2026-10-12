@@ -27,3 +27,16 @@ class ChannelConfig:
     def n_intervals(self) -> int:
         """M = T/dt, so the receiver signal is rx_0, rx_M"""
         return round(self.T / self.dt)
+
+@dataclass(frozen=True)
+class EncoderConfig:
+    """The encoder section: when each symbol releases its molecules"""
+    n_slots: int                            # number of release slots
+    slot_dt: float                          # time between slots: slot k releases at t = k . slot_dt
+    budget: int                             # molecules per symbol
+    symbols: tuple[tuple[int, ...], ...]    # symbols[u][k] = molecules symbol u releases in slot k 
+
+    @property
+    def n_symbols(self) -> int:
+        """N, the number of symbols (one release vector each)"""  
+        return len(self.symbols)  
