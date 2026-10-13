@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import json
 import difflib
+import math
 
 RECOMMENDED_RUNS = 300
 
@@ -118,3 +119,21 @@ def _closest(key: str, allowed: list[str]) -> str | None:
             return name
     close = difflib.get_close_matches(key, allowed, n=1)
     return close[0] if close else None
+
+def _whole(value: object, where: str, minimum: int) -> int:
+    """a whole number of at least 'minimum' or ConfigError"""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(
+            f"{where!r} must be a whole number, got {value!r}"
+        )
+    if value < minimum:
+        raise ConfigError(f"{where!r} must be at least {minimum}, got {value}")
+    return value
+
+def _positive(value: object, where: str) -> float:
+    """a finite number greater than 0, returned as a float, or ConfigError"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{where!r} must be a number, got {value!r}")
+    if not math.isfinite(value) or value <= 0:
+        raise ConfigError(f"{where!r} must be a finite number greater than 0, got {value}")
+    return float(value)

@@ -4,7 +4,7 @@ import dataclasses
 import pytest
 from pathlib import Path
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
-                            OutputConfig, Config, read_config_file, _check_keys)
+                            OutputConfig, Config, read_config_file, _check_keys, _whole, _positive)
 
 
 # 3a: ChannelConfig
@@ -130,3 +130,31 @@ def test_missing_keys_are_all_listed():
 def test_section_must_be_an_object():
     with pytest.raises(ConfigError, match="'data' must be a json object, not list"):
         _check_keys(["x.csv"], "data", DATA_REQUIRED, DATA_OPTIONAL)
+
+
+# 6: number checks
+def test_whole_accepts_whole_numbers():
+    assert _whole(4, "channel.L", minimum=2) == 4
+
+@pytest.mark.parametrize("value", [True, False, 4.5, 4.0, "4", None])
+def test_whole_rejects_anything_else(value):
+    with pytest.raises(ConfigError, match="must be a whole number"):
+        _whole(value, "channel.L", minimum=2)
+
+def test_whole_checks_the_minimum():
+    with pytest.raises(ConfigError, match="'channel.L' must be at least 2, got 1"):
+        _whole(1, "channel.L", minimum=2)
+
+def test_positive_accepts_numbers_and_returns_a_float():
+    assert _positive(2, "channel.D") == 2.0
+    assert isinstance(_positive(2, "channel.D"), float)
+
+@pytest.mark.parametrize("value", [0, -1.5, float("nan"), float("inf")])
+def test_positive_rejects_zero_negative_nan_and_infinity(value):
+    with pytest.raises(ConfigError, match="finite number greater than 0"):
+        _positive(value, "channel.D")
+
+@pytest.mark.parametrize("value", [True, "2.0", None])
+def test_positive_rejects_non_numbers(value):
+    with pytest.raises(ConfigError, match="must be a number"):
+        _positive(value, "channel.D")
