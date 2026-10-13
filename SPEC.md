@@ -159,3 +159,9 @@ Learning the encoder (joint training), possibly with a pre-training stage.
 - ASCII banner and version box at start, hidden when output is not a terminal.
 - Results in boxes; the confusion matrix as an aligned text table.
 - Progress only in a terminal; every line under 80 columns.
+
+## New experiments (step 7)
+
+Users never start from a blank file: `mi-race new NAME` copies the example config,
+gives it its own data and output paths, and validates it. `mi-race check CONFIG`
+re-validates after editing. The example config must always pass validation.
