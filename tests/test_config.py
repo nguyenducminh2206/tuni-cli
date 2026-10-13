@@ -4,7 +4,8 @@ import dataclasses
 import pytest
 from pathlib import Path
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
-                            OutputConfig, Config, read_config_file, _check_keys, _whole, _positive)
+                            OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
+                            _parse_channel)
 
 
 # 3a: ChannelConfig
@@ -158,3 +159,50 @@ def test_positive_rejects_zero_negative_nan_and_infinity(value):
 def test_positive_rejects_non_numbers(value):
     with pytest.raises(ConfigError, match="must be a number"):
         _positive(value, "channel.D")
+
+
+# 7: channel section
+@pytest.fixture
+def channel_raw():
+    """the channel section of the example config, as a fresh dict for each test."""
+    return read_config_file(EXAMPLE)["channel"]
+
+def test_channel_from_the_example(channel_raw):
+    channel = _parse_channel(channel_raw)
+    assert channel == ChannelConfig(L=4, h=1.0, D=2.0, dt=0.01, T=2.0)
+    assert channel.n_intervals == 200
+
+def test_channel_L_at_least_2(channel_raw):
+    channel_raw["L"] = 1
+    with pytest.raises(ConfigError, match="'channel.L' must be at least 2"):
+        _parse_channel(channel_raw)
+
+
+@pytest.mark.parametrize("key", ["h", "D", "dt", "T"])
+def test_channel_physics_must_be_positive(channel_raw, key):
+    channel_raw[key] = 0
+    with pytest.raises(ConfigError, match=f"'channel.{key}' must be a finite number greater than 0"):
+        _parse_channel(channel_raw)
+
+
+def test_channel_T_over_dt_must_be_whole(channel_raw):
+    channel_raw["dt"] = 0.03                        # 2.0 / 0.03 = 66.67 steps
+    with pytest.raises(ConfigError, match="whole number of steps"):
+        _parse_channel(channel_raw)
+
+
+def test_channel_T_over_dt_tolerates_float_rounding(channel_raw):
+    channel_raw.update(dt=0.1, T=0.3)               # 0.3 / 0.1 = 2.9999999999999996 in Python
+    assert _parse_channel(channel_raw).n_intervals == 3
+
+
+def test_channel_dt_longer_than_T(channel_raw):
+    channel_raw["dt"] = 3.0                         # 2.0 / 3.0 = 0.67 steps
+    with pytest.raises(ConfigError, match="whole number of steps"):
+        _parse_channel(channel_raw)
+
+
+def test_channel_typo_in_a_key(channel_raw):
+    channel_raw["Dt"] = channel_raw.pop("dt")
+    with pytest.raises(ConfigError, match="Did you mean 'dt'"):
+        _parse_channel(channel_raw)

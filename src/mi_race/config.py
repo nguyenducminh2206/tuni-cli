@@ -10,6 +10,7 @@ import difflib
 import math
 
 RECOMMENDED_RUNS = 300
+_TOL = 1e-9
 
 class ConfigError(ValueError):
     """the config breaks a rule in SPEC.md"""
@@ -137,3 +138,21 @@ def _positive(value: object, where: str) -> float:
     if not math.isfinite(value) or value <= 0:
         raise ConfigError(f"{where!r} must be a finite number greater than 0, got {value}")
     return float(value)
+
+
+def _parse_channel(raw:object) -> ChannelConfig:
+    """check the channel section and build a ChannelConfig"""
+    _check_keys(raw, "channel", required=("L", "h", "D", "dt", "T"))
+    L = _whole(raw["L"], "channel.L", minimum=2)
+    h = _positive(raw["h"], "channel.h")
+    D = _positive(raw["D"], "channel.D")
+    dt = _positive(raw["dt"], "channel.dt")
+    T = _positive(raw["T"], "channel.T")
+
+    steps = T / dt
+    nearest = round(steps)
+    if nearest < 1 or abs(steps - nearest) > _TOL * steps:
+        raise ConfigError(
+            f"'channel.T' / 'channel.dt' must be a whole number of steps, got {T:g} / {dt:g} = {steps:g}"
+        )
+    return ChannelConfig(L=L, h=h, D=D, dt=dt, T=T)
