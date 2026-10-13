@@ -4,6 +4,9 @@ Load a config file and check it against the rules in SPEC.md
 """
 
 from dataclasses import dataclass, field
+from pathlib import Path
+import json
+
 
 RECOMMENDED_RUNS = 300
 
@@ -68,3 +71,26 @@ class Config:
     seed: int = 0                                   # master seed for all randomness
     decoders: dict = field(default_factory=dict)    
     output: OutputConfig = field(default_factory=OutputConfig)
+
+
+def read_config_file(path: str | Path) -> dict:
+    """Read json config file into a dict (values are not checked yet)"""
+    path = Path(path)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise ConfigError(f"config file not found: {path}") from None
+    try: 
+        return json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except json.JSONDecodeError as e:
+        raise ConfigError(f"{path} is not valid json: {e}") from None
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
+    """not allow a key appears twice in json"""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ConfigError(f"key {key!r} appears twice in the same section")
+        result[key] = value
+    return result
