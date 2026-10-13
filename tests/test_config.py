@@ -4,7 +4,8 @@ import dataclasses
 import pytest
 from pathlib import Path
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
-                            OutputConfig, Config, read_config_file)
+                            OutputConfig, Config, read_config_file, _check_keys)
+
 
 # 3a: ChannelConfig
 def test_jump_rate_is_D_over_h_squared():
@@ -100,3 +101,32 @@ def test_duplicate_key_inside_a_section(tmp_path):
     dup.write_text('{"channel": {"L": 4, "L": 5} }')
     with pytest.raises(ConfigError, match="'L' appears twice"):
         read_config_file(dup)
+
+# 5: missing and unknown keys
+DATA_REQUIRED = ("path",)
+DATA_OPTIONAL = ("runs_per_symbol", "test_fraction")
+CHANNEL_KEYS = ("L", "h", "D", "dt", "T")
+
+def test_keys_ok():
+    _check_keys({"path": "x.csv", "runs_per_symbol": 300}, "data", DATA_REQUIRED, DATA_OPTIONAL)
+
+def test_unknown_key_suggests_the_right_one():
+    with pytest.raises(ConfigError, match="unknown key 'runs_per_symbo' in 'data'. Did you mean 'runs_per_symbol'"):
+        _check_keys({"path": "x.csv", "runs_per_symbo": 300}, "data", DATA_REQUIRED, DATA_OPTIONAL)
+
+def test_capitals_typo_suggests_the_right_key():
+    channel = {"L": 4, "h": 1.0, "D": 2.0, "dT": 0.01, "T": 2.0}
+    with pytest.raises(ConfigError, match="Did you mean 'dt'"):
+        _check_keys(channel, "channel", CHANNEL_KEYS)
+
+def test_unknown_key_without_a_close_match_lists_the_allowed_keys():
+    with pytest.raises(ConfigError, match="Allowed: path, runs_per_symbol, test_fraction"):
+        _check_keys({"path": "x.csv", "colour": "red"}, "data", DATA_REQUIRED, DATA_OPTIONAL)
+
+def test_missing_keys_are_all_listed():
+    with pytest.raises(ConfigError, match="'channel' is missing: D, T"):
+        _check_keys({"L": 4, "h": 1.0, "dt": 0.01}, "channel", CHANNEL_KEYS)
+
+def test_section_must_be_an_object():
+    with pytest.raises(ConfigError, match="'data' must be a json object, not list"):
+        _check_keys(["x.csv"], "data", DATA_REQUIRED, DATA_OPTIONAL)

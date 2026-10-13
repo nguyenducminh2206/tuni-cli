@@ -6,17 +6,17 @@ Load a config file and check it against the rules in SPEC.md
 from dataclasses import dataclass, field
 from pathlib import Path
 import json
-
+import difflib
 
 RECOMMENDED_RUNS = 300
 
 class ConfigError(ValueError):
-    """The config breaks a rule in SPEC.md"""
+    """the config breaks a rule in SPEC.md"""
 
 
 @dataclass(frozen=True)
 class ChannelConfig:
-    """The channel section: a tube of compartments with an absorbing receiver"""
+    """the channel section: a tube of compartments with an absorbing receiver"""
     L: int      # positions: comp 0 ... L-2, receiver at L-1
     h: float    # comp width
     D: float    # diffusion coefficient
@@ -36,7 +36,7 @@ class ChannelConfig:
 
 @dataclass(frozen=True)
 class EncoderConfig:
-    """The encoder section: when each symbol releases its molecules"""
+    """the encoder section: when each symbol releases its molecules"""
     n_slots: int                            # number of release slots
     slot_dt: float                          # time between slots: slot k releases at t = k . slot_dt
     budget: int                             # molecules per symbol
@@ -50,7 +50,7 @@ class EncoderConfig:
 
 @dataclass(frozen=True)
 class DataConfig:
-    """The data section: where the dataset goes and how it is split"""
+    """the data section: where the dataset goes and how it is split"""
     path: str                                   # where the simulated dataset is saved
     runs_per_symbol: int = RECOMMENDED_RUNS     # simulations per symbol
     test_fraction: float = 0.2                  # share of runs kept asidde for testing
@@ -58,12 +58,12 @@ class DataConfig:
 
 @dataclass(frozen=True)
 class OutputConfig:
-    """The output section: where results are written"""
+    """the output section: where results are written"""
     dir: str = "outputs"
 
 @dataclass(frozen=True)
 class Config:
-    """A complete, checked config: one field per section of the json file"""
+    """a complete, checked config: one field per section of the json file"""
     schema_version: int
     channel: ChannelConfig
     encoder: EncoderConfig
@@ -74,7 +74,7 @@ class Config:
 
 
 def read_config_file(path: str | Path) -> dict:
-    """Read json config file into a dict (values are not checked yet)"""
+    """read json config file into a dict (values are not checked yet)"""
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8")
@@ -94,3 +94,27 @@ def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
             raise ConfigError(f"key {key!r} appears twice in the same section")
         result[key] = value
     return result
+
+def _check_keys(
+        section: object, where: str, required: tuple[str, ...], optional: tuple[str, ...] = ()
+) -> None:
+    """check that 'section' is a json object with every required key and no unknown"""
+    if not isinstance(section, dict):
+        raise ConfigError(f"{where!r} must be a json object, not {type(section).__name__}")
+    allowed = list(required) + list(optional)
+    for key in section:
+        if key not in allowed:
+            guess = _closest(key, allowed)
+            hint = f" Did you mean '{guess}'?" if guess else f" Allowed: {', '.join(allowed)}"
+            raise ConfigError(f"unknown key '{key}' in {where!r}.{hint}")
+    missing = [key for key in required if key not in section]
+    if missing:
+        raise ConfigError(f"{where!r} is missing: {', '.join(missing)}")
+
+def _closest(key: str, allowed: list[str]) -> str | None:
+    """the allowed key that 'key' was probably meant to be, or None"""
+    for name in allowed:
+        if name.lower() == key.lower():
+            return name
+    close = difflib.get_close_matches(key, allowed, n=1)
+    return close[0] if close else None
