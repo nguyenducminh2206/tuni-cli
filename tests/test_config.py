@@ -2,7 +2,7 @@
 
 import dataclasses
 import pytest
-from mi_race.config import ChannelConfig, EncoderConfig, DataConfig, OutputConfig
+from mi_race.config import ChannelConfig, EncoderConfig, DataConfig, OutputConfig, Config
 
 # 3a: ChannelConfig
 def test_jump_rate_is_D_over_h_squared():
@@ -42,3 +42,27 @@ def test_data_path_is_required():
 
 def test_output_dir_defaults_to_outputs():
     assert OutputConfig().dir == "outputs"
+
+# 3d: Config
+def make_config():
+    """A small, complete Config built by hand (only for testing)"""
+    return Config(
+        schema_version=1, 
+        channel=ChannelConfig(L=4, h=1.0, D=2.0, dt=0.01, T=2.0),
+        encoder=EncoderConfig(n_slots=3, slot_dt=0.1, budget=50, symbols=((50, 0, 0), (0, 0, 50))),
+        data=DataConfig(path="data/example.csv")
+    )
+
+def test_config_defaults_match_the_spec():
+    cfg = make_config()
+    assert cfg.seed == 0
+    assert cfg.decoders == {}
+    assert cfg.output == OutputConfig(dir="outputs")
+
+def test_each_config_gets_its_own_decoders_dict():
+    assert make_config().decoders is not make_config().decoders
+
+def test_config_cannot_be_changed():
+    cfg = make_config()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        cfg.seed = 1
