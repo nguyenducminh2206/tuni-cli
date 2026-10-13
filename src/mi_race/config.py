@@ -3,7 +3,7 @@ Load a config file and check it against the rules in SPEC.md
 (config validation)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 RECOMMENDED_RUNS = 300
 
@@ -58,3 +58,13 @@ class OutputConfig:
     """The output section: where results are written"""
     dir: str = "outputs"
 
+@dataclass(frozen=True)
+class Config:
+    """A complete, checked config: one field per section of the json file"""
+    schema_version: int
+    channel: ChannelConfig
+    encoder: EncoderConfig
+    data: DataConfig
+    seed: int = 0                                   # master seed for all randomness
+    decoders: dict = field(default_factory=dict)    
+    output: OutputConfig = field(default_factory=OutputConfig)
