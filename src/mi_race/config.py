@@ -12,6 +12,12 @@ import warnings
 
 RECOMMENDED_RUNS = 300
 _TOL = 1e-9
+DECODER_FIELDS = {
+    "random_forest": ("n_estimators",),
+    "mlp": ("hidden_layers", "epochs", "lr", "batch_size"),
+    "cnn": ("channels", "kernel_size", "epochs", "lr", "batch_size")
+}
+
 
 class ConfigError(ValueError):
     """the config breaks a rule in SPEC.md"""
@@ -217,3 +223,20 @@ def _parse_data(raw: object) -> DataConfig:
         )
     
     return DataConfig(path=path, runs_per_symbol=runs, test_fraction=fraction)
+
+
+def _parse_output(raw: object) -> OutputConfig:
+    """check the output section and build and OutputConfig"""
+    _check_keys(raw, "output", required=(), optional=("dir",))
+    directory = raw.get("dir", OutputConfig.dir)
+    if not isinstance(directory, str) or not directory.strip():
+        raise ConfigError(f"'output.dir' must be a folder path like 'outputs', got {directory!r}")
+    return OutputConfig(dir=directory)
+
+
+def _parse_decoders(raw: object) -> dict:
+    """check decoder names and their setting names; the values are checked in step 5"""
+    _check_keys(raw, "decoders", required=(), optional=tuple(DECODER_FIELDS))
+    for name, settings in raw.items():
+        _check_keys(settings, f"decoders.{name}", required=(), optional=DECODER_FIELDS[name])
+    return {name: dict(settings) for name, settings in raw.items()}

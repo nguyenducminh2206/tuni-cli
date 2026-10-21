@@ -6,7 +6,8 @@ from pathlib import Path
 import warnings
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
-                            _parse_channel, _parse_symbols, _parse_encoder, _parse_data)
+                            _parse_channel, _parse_symbols, _parse_encoder, _parse_data, _parse_output,
+                            _parse_decoders)
 
 
 # 3a: ChannelConfig
@@ -321,3 +322,35 @@ def test_enough_runs_give_no_warning(example_raw):
     with warnings.catch_warnings():
         warnings.simplefilter("error")               # any warning would fail this test
         _parse_data(example_raw["data"])
+
+# 9b: output and decoders sections
+def test_output_from_the_example(example_raw):
+    assert _parse_output(example_raw["output"]) == OutputConfig(dir="outputs")
+
+def test_output_default():
+    assert _parse_output({}) == OutputConfig()
+
+@pytest.mark.parametrize("directory", ["", "   ", 5])
+def test_output_dir_must_be_a_non_empty_text(directory):
+    with pytest.raises(ConfigError, match="'output.dir' must be a folder path"):
+        _parse_output({"dir": directory})
+
+def test_decoders_from_the_example(example_raw):
+    decoders = _parse_decoders(example_raw["decoders"])
+    assert set(decoders) == {"random_forest", "mlp", "cnn"}
+    assert decoders["mlp"]["hidden_layers"] == [128, 128]
+
+def test_no_decoders_is_allowed():
+    assert _parse_decoders({}) == {}
+
+def test_unknown_decoder():
+    with pytest.raises(ConfigError, match="unknown key 'rnn' in 'decoders'"):
+        _parse_decoders({"rnn": {}})
+
+def test_typo_in_a_decoder_setting():
+    with pytest.raises(ConfigError, match="Did you mean 'hidden_layers'"):
+        _parse_decoders({"mlp": {"hiden_layers": [64]}})
+
+def test_decoder_settings_must_be_an_object():
+    with pytest.raises(ConfigError, match="'decoders.cnn' must be a json object"):
+        _parse_decoders({"cnn": 5})
