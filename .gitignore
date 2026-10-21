@@ -27,6 +27,7 @@ mi-race/outputs/
 mi-race/processed_data/
 temp/
 experiments/
+tests/test_function.py
 
 # macOS clutter
 .DS_Store
