@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
-                            _parse_channel, _parse_symbols)
+                            _parse_channel, _parse_symbols, _parse_encoder)
 
 
 # 3a: ChannelConfig
@@ -204,7 +204,7 @@ def test_channel_typo_in_a_key(channel_raw):
         _parse_channel(channel_raw)
 
 
-# 8: the symbols
+# 8a: the symbols
 def test_symbols_become_tuples():
     symbols = _parse_symbols([[50, 0, 0], [0, 20, 30]], n_slots=3, budget=50)
     assert symbols == ((50, 0, 0), (0, 20, 30))
@@ -234,3 +234,46 @@ def test_amounts_must_be_whole():
 def test_every_symbol_uses_the_whole_budget():
     with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]' releases 40 molecules, but the 'budget' is 50"):
         _parse_symbols([[50, 0, 0], [0, 40, 0]], n_slots=3, budget=50)
+
+
+# 8b: the encoder section
+@pytest.fixture
+def example_raw():
+    """the whole example config as a fresh dict for each test"""
+    return read_config_file(EXAMPLE)
+
+def test_encoder_from_the_example(example_raw):
+    channel = _parse_channel(example_raw["channel"])
+    encoder = _parse_encoder(example_raw["encoder"], channel)
+    assert encoder.n_symbols == 4
+    assert encoder.symbols[1] == (0, 0, 0, 50, 0, 0, 0, 0, 0, 0)
+
+
+@pytest.mark.parametrize("key, value, message", [
+    ("n_slots", 0, "'encoder.n_slots' must be at least 1"),
+    ("slot_dt", 0, "'encoder.slot_dt' must be a finite number greater than 0"),
+    ("budget", 0, "'encoder.budget' must be at least 1"),
+])
+def test_encoder_numbers(example_raw, key, value, message):
+    example_raw["encoder"][key] = value
+    channel = _parse_channel(example_raw["channel"])
+    with pytest.raises(ConfigError, match=message):
+        _parse_encoder(example_raw["encoder"], channel)
+
+
+def test_no_release_at_or_after_T(example_raw):
+    example_raw["encoder"]["n_slots"] = 21          # last slot at 20 × 0.1 = 2.0 s = T
+    channel = _parse_channel(example_raw["channel"])
+    with pytest.raises(ConfigError, match="before 'channel.T' = 2s"):
+        _parse_encoder(example_raw["encoder"], channel)
+
+def test_last_slot_before_T_is_fine(example_raw):
+    example_raw["channel"]["T"] = 1.0               # last slot at 9 × 0.1 = 0.9 s < 1.0 s
+    channel = _parse_channel(example_raw["channel"])
+    assert _parse_encoder(example_raw["encoder"], channel).n_slots == 10
+
+def test_encoder_checks_the_symbols_too(example_raw):
+    example_raw["encoder"]["n_slots"] = 11          # the vectors still have 10 entries
+    channel = _parse_channel(example_raw["channel"])
+    with pytest.raises(ConfigError, match="has 10 entries, but 'n_slots' = 11"):
+        _parse_encoder(example_raw["encoder"], channel)

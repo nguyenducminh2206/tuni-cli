@@ -174,4 +174,19 @@ def _parse_symbols(raw: object, n_slots: int, budget: int) -> tuple[tuple[int, .
             raise ConfigError(f"{where!r} releases {sum(amounts)} molecules, but the 'budget' is {budget}")
         vectors.append(amounts)
     return tuple(vectors)
-        
+
+
+def _parse_encoder(raw: object, channel: ChannelConfig) -> EncoderConfig:
+    """check the encoder section and build an EncoderConfig"""
+    _check_keys(raw, "encoder", required=("n_slots", "slot_dt", "budget", "symbols"))
+    n_slots = _whole(raw["n_slots"], "encoder.n_slots", minimum=1)
+    slot_dt = _positive(raw["slot_dt"], "encoder.slot_dt")
+    budget = _whole(raw["budget"], "encoder.budget", minimum=1)
+
+    last_release = (n_slots - 1) * slot_dt
+    if last_release >= channel.T * (1 - _TOL):
+        raise ConfigError(
+            f"the last slot releases at t = {last_release:g}s, but every release must happen before 'channel.T' = {channel.T:g}s. "
+            f"Use fewer 'n_slots' or a smaller 'slot_dt'")
+    symbols = _parse_symbols(raw["symbols"], n_slots, budget)
+    return EncoderConfig(n_slots=n_slots, slot_dt=slot_dt, budget=budget, symbols=symbols)
