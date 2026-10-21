@@ -8,6 +8,7 @@ from pathlib import Path
 import json
 import difflib
 import math
+import warnings
 
 RECOMMENDED_RUNS = 300
 _TOL = 1e-9
@@ -190,3 +191,29 @@ def _parse_encoder(raw: object, channel: ChannelConfig) -> EncoderConfig:
             f"Use fewer 'n_slots' or a smaller 'slot_dt'")
     symbols = _parse_symbols(raw["symbols"], n_slots, budget)
     return EncoderConfig(n_slots=n_slots, slot_dt=slot_dt, budget=budget, symbols=symbols)
+
+
+def _parse_data(raw: object) -> DataConfig:
+    """check the data section and build DataConfig"""
+    _check_keys(raw, "data", required=("path",), optional=("runs_per_symbol", "test_fraction"))
+    path = raw["path"]
+    if not isinstance(path, str) or not path.strip():
+        raise ConfigError(f"'data.path' must be a file path like 'data/example.csv', got {path!r}")
+    runs = _whole(raw.get("runs_per_symbol", DataConfig.runs_per_symbol), "data.runs_per_symbol", minimum=1)
+    fraction = _positive(raw.get("test_fraction", DataConfig.test_fraction), "data.test_fraction")
+    if fraction >= 1:
+        raise ConfigError(f"'data.test_fraction' must be between 0 and 1, got {fraction:g}")
+
+    test_runs = runs * fraction
+    if test_runs < 1 - _TOL or runs - test_runs < 1 - _TOL:
+        raise ConfigError(
+            f"'data.runs_per_symbol' = {runs} is too small for 'data_test_fraction' = {fraction:g} "
+            "every symbol needs at least one training run and one test run"
+        )
+    if runs < RECOMMENDED_RUNS:
+        warnings.warn(
+            f"'data.runs_per_symbol' = {runs} is below {RECOMMENDED_RUNS}: fine for quick test, "
+            "but results (especially MI) will be noisy"
+        )
+    
+    return DataConfig(path=path, runs_per_symbol=runs, test_fraction=fraction)

@@ -3,9 +3,10 @@
 import dataclasses
 import pytest
 from pathlib import Path
+import warnings
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
-                            _parse_channel, _parse_symbols, _parse_encoder)
+                            _parse_channel, _parse_symbols, _parse_encoder, _parse_data)
 
 
 # 3a: ChannelConfig
@@ -277,3 +278,46 @@ def test_encoder_checks_the_symbols_too(example_raw):
     channel = _parse_channel(example_raw["channel"])
     with pytest.raises(ConfigError, match="has 10 entries, but 'n_slots' = 11"):
         _parse_encoder(example_raw["encoder"], channel)
+
+
+# 9a: data section
+def test_data_from_the_example(example_raw):
+    data = _parse_data(example_raw["data"])
+    assert data == DataConfig(path="data/example.csv", runs_per_symbol=300, test_fraction=0.2)
+
+
+def test_data_defaults():
+    assert _parse_data({"path": "data/x.csv"}) == DataConfig(path="data/x.csv")
+
+
+@pytest.mark.parametrize("path", ["", "   ", 42, None])
+def test_data_path_must_be_a_non_empty_text(example_raw, path):
+    example_raw["data"]["path"] = path
+    with pytest.raises(ConfigError, match="'data.path' must be a file path"):
+        _parse_data(example_raw["data"])
+
+
+@pytest.mark.parametrize("fraction", [0, 1, 1.5, -0.2])
+def test_test_fraction_between_0_and_1(example_raw, fraction):
+    example_raw["data"]["test_fraction"] = fraction
+    with pytest.raises(ConfigError, match="'data.test_fraction' must be"):
+        _parse_data(example_raw["data"])
+
+
+@pytest.mark.parametrize("runs, fraction", [(4, 0.2), (2, 0.6)])
+def test_every_symbol_gets_a_training_and_a_test_run(example_raw, runs, fraction):
+    example_raw["data"].update(runs_per_symbol=runs, test_fraction=fraction)
+    with pytest.raises(ConfigError, match="at least one training run and one test run"):
+        _parse_data(example_raw["data"])
+
+
+def test_few_runs_give_a_warning(example_raw):
+    example_raw["data"]["runs_per_symbol"] = 50
+    with pytest.warns(UserWarning, match="noisy"):
+        _parse_data(example_raw["data"])
+
+
+def test_enough_runs_give_no_warning(example_raw):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")               # any warning would fail this test
+        _parse_data(example_raw["data"])
