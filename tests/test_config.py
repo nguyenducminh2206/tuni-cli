@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
-                            _parse_channel)
+                            _parse_channel, _parse_symbols)
 
 
 # 3a: ChannelConfig
@@ -103,6 +103,7 @@ def test_duplicate_key_inside_a_section(tmp_path):
     with pytest.raises(ConfigError, match="'L' appears twice"):
         read_config_file(dup)
 
+
 # 5: missing and unknown keys
 DATA_REQUIRED = ("path",)
 DATA_OPTIONAL = ("runs_per_symbol", "test_fraction")
@@ -177,32 +178,59 @@ def test_channel_L_at_least_2(channel_raw):
     with pytest.raises(ConfigError, match="'channel.L' must be at least 2"):
         _parse_channel(channel_raw)
 
-
 @pytest.mark.parametrize("key", ["h", "D", "dt", "T"])
 def test_channel_physics_must_be_positive(channel_raw, key):
     channel_raw[key] = 0
     with pytest.raises(ConfigError, match=f"'channel.{key}' must be a finite number greater than 0"):
         _parse_channel(channel_raw)
 
-
 def test_channel_T_over_dt_must_be_whole(channel_raw):
     channel_raw["dt"] = 0.03                        # 2.0 / 0.03 = 66.67 steps
     with pytest.raises(ConfigError, match="whole number of steps"):
         _parse_channel(channel_raw)
 
-
 def test_channel_T_over_dt_tolerates_float_rounding(channel_raw):
     channel_raw.update(dt=0.1, T=0.3)               # 0.3 / 0.1 = 2.9999999999999996 in Python
     assert _parse_channel(channel_raw).n_intervals == 3
-
 
 def test_channel_dt_longer_than_T(channel_raw):
     channel_raw["dt"] = 3.0                         # 2.0 / 3.0 = 0.67 steps
     with pytest.raises(ConfigError, match="whole number of steps"):
         _parse_channel(channel_raw)
 
-
 def test_channel_typo_in_a_key(channel_raw):
     channel_raw["Dt"] = channel_raw.pop("dt")
     with pytest.raises(ConfigError, match="Did you mean 'dt'"):
         _parse_channel(channel_raw)
+
+
+# 8: the symbols
+def test_symbols_become_tuples():
+    symbols = _parse_symbols([[50, 0, 0], [0, 20, 30]], n_slots=3, budget=50)
+    assert symbols == ((50, 0, 0), (0, 20, 30))
+    assert isinstance(symbols[0], tuple)
+
+@pytest.mark.parametrize("symbols", [[[50, 0, 0]], "abc", []])
+def test_symbols_needs_a_list_of_at_least_two(symbols):
+    with pytest.raises(ConfigError, match="at least 2 release vectors"):
+        _parse_symbols(symbols, n_slots=3, budget=50)
+
+def test_each_symbol_must_be_a_list():
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]' must be a list"):
+        _parse_symbols([[50, 0, 0], "abc"], n_slots=3, budget=50)
+
+def test_each_symbol_has_n_slots_entries():
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]' has 2 entries, but 'n_slots' = 3"):
+        _parse_symbols([[50, 0, 0], [0, 50]], n_slots=3, budget=50)
+
+def test_amounts_cannot_be_negative():
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]\[1\]' must be at least 0"):
+        _parse_symbols([[50, 0, 0], [60, -10, 0]], n_slots=3, budget=50)   # still sums to 50
+
+def test_amounts_must_be_whole():
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]\[0\]' must be a whole number"):
+        _parse_symbols([[50, 0, 0], [49.5, 0.5, 0]], n_slots=3, budget=50)
+
+def test_every_symbol_uses_the_whole_budget():
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]' releases 40 molecules, but the 'budget' is 50"):
+        _parse_symbols([[50, 0, 0], [0, 40, 0]], n_slots=3, budget=50)

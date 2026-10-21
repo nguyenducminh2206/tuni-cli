@@ -156,3 +156,22 @@ def _parse_channel(raw:object) -> ChannelConfig:
             f"'channel.T' / 'channel.dt' must be a whole number of steps, got {T:g} / {dt:g} = {steps:g}"
         )
     return ChannelConfig(L=L, h=h, D=D, dt=dt, T=T)
+
+
+def _parse_symbols(raw: object, n_slots: int, budget: int) -> tuple[tuple[int, ...], ...]:
+    """check the release vectors and return them as tuples (symbol u = u-th vector)"""
+    if not isinstance(raw, list) or len(raw) < 2:
+        raise ConfigError("'encoder.symbols' must be a list of at least 2 release vectors")
+    vectors = []
+    for u, vector in enumerate(raw):
+        where = f"encoder.symbols[{u}]"
+        if not isinstance(vector, list):
+            raise ConfigError(f"{where!r} must be a list of {n_slots} whole numbers")
+        if len(vector) != n_slots:
+            raise ConfigError(f"{where!r} has {len(vector)} entries, but 'n_slots' = {n_slots}")
+        amounts = tuple(_whole(x, f'{where}[{k}]', minimum=0) for k, x in enumerate(vector))
+        if sum(amounts) != budget:
+            raise ConfigError(f"{where!r} releases {sum(amounts)} molecules, but the 'budget' is {budget}")
+        vectors.append(amounts)
+    return tuple(vectors)
+        
