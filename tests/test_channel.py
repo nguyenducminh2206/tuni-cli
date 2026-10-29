@@ -1,8 +1,9 @@
 """tests for src/mi_race/channel.py"""
 
-from mi_race.channel import jump_rates, next_jump
+from mi_race.channel import jump_rates, next_jump, simulate
 import pytest
 import numpy as np
+
 
 # 2b: jump rates
 def test_compartment_0_can_only_jump_right():
@@ -75,3 +76,46 @@ def test_same_seed_gives_the_same_jumps():
     a = np.random.default_rng(7)
     b = np.random.default_rng(7)
     assert [next_jump(jumps, a) for _ in range(20)] == [next_jump(jumps, b) for _ in range(20)]
+
+
+# 2d: the SSA loop
+def test_no_releases_means_nothing_happens():
+    rng = np.random.default_rng(0)
+    assert simulate([], L=4, jump_rate=2.0, T=2.0, rng=rng) == ([], [0, 0, 0])
+
+
+@pytest.mark.parametrize("schedule", [
+    [(0.0, 50)],                                    # one pulse
+    [(0.0, 30), (0.5, 20)],                         # split release
+    [(1.9, 50)],                                    # released just before the end
+])
+def test_every_molecule_is_in_the_tube_or_absorbed(schedule):
+    rng = np.random.default_rng(0)
+    absorbed, counts = simulate(schedule, L=4, jump_rate=2.0, T=2.0, rng=rng)
+    released = sum(amount for _, amount in schedule)
+    assert len(absorbed) + sum(counts) == released
+
+def test_absorptions_are_in_time_order_and_before_the_end():
+    rng = np.random.default_rng(0)
+    absorbed, _ = simulate([(0.0, 50)], L=4, jump_rate=2.0, T=2.0, rng=rng)
+    assert absorbed == sorted(absorbed)
+    assert all(0 < t < 2.0 for t in absorbed)
+
+def test_nothing_is_absorbed_before_the_first_release():
+    rng = np.random.default_rng(0)
+    absorbed, _ = simulate([(1.0, 50)], L=4, jump_rate=2.0, T=2.0, rng=rng)
+    assert len(absorbed) > 0
+    assert all(t > 1.0 for t in absorbed)
+
+def test_shortest_tube_absorbs_after_one_over_lambda_on_average():
+    # L = 2: each molecule is absorbed after a random wait with mean 1 / λ = 0.5 s
+    rng = np.random.default_rng(0)
+    absorbed, counts = simulate([(0.0, 2000)], L=2, jump_rate=2.0, T=50.0, rng=rng)
+    assert counts == [0]                            # after 50 s every molecule is absorbed
+    assert sum(absorbed) / len(absorbed) == pytest.approx(0.5, rel=0.05)
+
+def test_same_seed_gives_the_same_run():
+    schedule = [(0.0, 30), (0.5, 20)]
+    a = simulate(schedule, L=4, jump_rate=2.0, T=2.0, rng=np.random.default_rng(7))
+    b = simulate(schedule, L=4, jump_rate=2.0, T=2.0, rng=np.random.default_rng(7))
+    assert a == b

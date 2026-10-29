@@ -38,3 +38,33 @@ def next_jump(jumps: list[tuple[int, int, float]], rng: np.random.Generator) -> 
             return wait, source, target     # the dart landed on this jump's piece
         dart -= rate                        # not this piece: move on to the next one
     return wait, source, target             # rounding left the dart a hair past the end
+
+
+def simulate(schedule: list[tuple[float, int]], L: int, jump_rate: float, T: float,
+             rng: np.random.Generator) -> tuple[list[float], list[int]]:
+    """run the SSA from t=0 to t=T, as (absorption times, counts as T)
+    schedule is the release schedule of one symbol, from encoder.release_schedule.
+    The end T works like one more release, of 0 molecules: the jumps stop there.
+    """
+    counts = [0] * (L-1)            # comp 0 ... L-2, all empty at the start 
+    absorbed = []                   # the time of every absorption, in order
+    t = 0.0
+    for release_time, amount in schedule + [(T, 0)]:
+        while True:                 # jump until the next release
+            jumps = jump_rates(counts, jump_rate)
+            if not jumps:
+                break               # empty tube: skip straight to the release
+
+            wait, source, target = next_jump(jumps, rng)
+            if t + wait >= release_time:
+                break               # the release comes first: discard this jump
+
+            t += wait
+            counts[source] -= 1
+            if target == L - 1:
+                absorbed.append(t)  # into the receiver
+            else:
+                counts[target] += 1
+        t = release_time
+        counts[0] += amount         # the release: molecules enter comp 0
+    return absorbed, counts
