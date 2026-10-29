@@ -1,5 +1,6 @@
 """encoder: turns a symbol into its release schedule
-    (when, and how many molecules, to release into compartment 0)"""
+    (when, and how many molecules, to release into compartment 0)
+"""
 
 TIME_DECIMALS = 12  # times are rounded to this many decimals to remove float noise
 
