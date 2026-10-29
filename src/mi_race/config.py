@@ -10,6 +10,7 @@ import difflib
 import math
 import warnings
 
+SCHEMA_VERSION = 1
 RECOMMENDED_RUNS = 300
 _TOL = 1e-9
 DECODER_FIELDS = {
@@ -62,7 +63,7 @@ class DataConfig:
     """the data section: where the dataset goes and how it is split"""
     path: str                                   # where the simulated dataset is saved
     runs_per_symbol: int = RECOMMENDED_RUNS     # simulations per symbol
-    test_fraction: float = 0.2                  # share of runs kept asidde for testing
+    test_fraction: float = 0.2                  # share of runs kept aside for testing
 
 
 @dataclass(frozen=True)
@@ -240,3 +241,35 @@ def _parse_decoders(raw: object) -> dict:
     for name, settings in raw.items():
         _check_keys(settings, f"decoders.{name}", required=(), optional=DECODER_FIELDS[name])
     return {name: dict(settings) for name, settings in raw.items()}
+
+
+def load_config(path: str | Path) -> Config:
+    """read a config gile and check everything: the one way to get a Config"""
+    raw = read_config_file(path)
+    try:
+        return parse_config(raw)
+    except ConfigError as e:
+        raise ConfigError(f"{path}: {e}") from None
+
+def parse_config(raw: object) -> Config:
+    """check a whole config and build a Config"""
+    if not isinstance(raw, dict):
+        raise ConfigError(f"the config must be a json object, not {type(raw).__name__}")
+    version = raw.get("schema_version")
+    if isinstance(version, bool) or version != SCHEMA_VERSION:
+        raise ConfigError(f"'schema_version' must be {SCHEMA_VERSION}, got {version!r}")
+    _check_keys(
+        raw, "config", 
+        required=("schema_version", "channel", "encoder", "data"),
+        optional=("seed", "decoders", "output"),
+    )
+    channel = _parse_channel(raw["channel"])
+    return Config(
+        schema_version=SCHEMA_VERSION,
+        channel=channel,
+        encoder=_parse_encoder(raw["encoder"], channel),
+        data=_parse_data(raw["data"]),
+        seed=_whole(raw.get("seed", Config.seed), "seed", minimum=0),
+        decoders=_parse_decoders(raw.get("decoders", {})),
+        output=_parse_output(raw.get("output", {}))
+    )

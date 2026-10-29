@@ -1,5 +1,6 @@
 """Tests for config.py"""
 
+import json
 import dataclasses
 import pytest
 from pathlib import Path
@@ -7,7 +8,7 @@ import warnings
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
                             _parse_channel, _parse_symbols, _parse_encoder, _parse_data, _parse_output,
-                            _parse_decoders)
+                            _parse_decoders, parse_config, load_config)
 
 
 # 3a: ChannelConfig
@@ -354,3 +355,54 @@ def test_typo_in_a_decoder_setting():
 def test_decoder_settings_must_be_an_object():
     with pytest.raises(ConfigError, match="'decoders.cnn' must be a json object"):
         _parse_decoders({"cnn": 5})
+
+
+# 10: the whole config
+def test_the_example_config_is_valid():
+    """the example is the template for every new experiment, so it must always pass."""
+    cfg = load_config(EXAMPLE)
+    assert cfg.channel.n_intervals == 200
+    assert cfg.encoder.n_symbols == 4
+    assert cfg.data.runs_per_symbol == 300
+    assert cfg.seed == 12345
+    assert set(cfg.decoders) == {"random_forest", "mlp", "cnn"}
+    assert cfg.output.dir == "outputs"
+
+def test_optional_sections_get_defaults(example_raw):
+    for key in ("seed", "decoders", "output"):
+        del example_raw[key]
+    cfg = parse_config(example_raw)
+    assert (cfg.seed, cfg.decoders, cfg.output) == (0, {}, OutputConfig())
+
+@pytest.mark.parametrize("version", [2, "1", True, None])
+def test_schema_version_must_be_1(example_raw, version):
+    example_raw["schema_version"] = version
+    with pytest.raises(ConfigError, match="'schema_version' must be 1"):
+        parse_config(example_raw)
+
+def test_missing_section(example_raw):
+    del example_raw["encoder"]
+    with pytest.raises(ConfigError, match="'config' is missing: encoder"):
+        parse_config(example_raw)
+
+def test_typo_in_a_section_name(example_raw):
+    example_raw["chanel"] = example_raw.pop("channel")
+    with pytest.raises(ConfigError, match="Did you mean 'channel'"):
+        parse_config(example_raw)
+
+def test_seed_must_be_at_least_0(example_raw):
+    example_raw["seed"] = -1
+    with pytest.raises(ConfigError, match="'seed' must be at least 0"):
+        parse_config(example_raw)
+
+def test_errors_inside_sections_reach_the_top(example_raw):
+    example_raw["encoder"]["symbols"][1][3] = 40
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]' releases 40 molecules"):
+        parse_config(example_raw)
+
+def test_load_config_names_the_file(tmp_path, example_raw):
+    example_raw["channel"]["L"] = 1
+    path = tmp_path / "my_experiment.json"
+    path.write_text(json.dumps(example_raw))
+    with pytest.raises(ConfigError, match="my_experiment.json: 'channel.L' must be at least 2"):
+        load_config(path)
