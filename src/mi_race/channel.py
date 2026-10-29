@@ -6,6 +6,9 @@ Compartment 0 has a reflecting wall on its left, and a jump into the receiver ab
 """
 
 import numpy as np
+import bisect
+
+from mi_race.encoder import TIME_DECIMALS
 
 
 def jump_rates(counts: list[int], jump_rate: float) -> list[tuple[int, int, float]]:
@@ -68,3 +71,19 @@ def simulate(schedule: list[tuple[float, int]], L: int, jump_rate: float, T: flo
         t = release_time
         counts[0] += amount         # the release: molecules enter comp 0
     return absorbed, counts
+
+
+def snapshot_times(dt: float, n_intervals: int) -> list[float]:
+    """the snapshot times t_0, ..., t_M with t_m = m * dt (rounded like the release time)"""
+    return [round(m * dt, TIME_DECIMALS) for m in range(n_intervals + 1)]
+
+def receiver_signal(absorbed: list[float], snapshots: list[float]) -> list[int]:
+    """the receiver signal rx_0 ... rx_M, one count per snapshot
+    rx_0 = 0, and rx_m is the number of absorptions in (t_{m-1}, t_m].
+    Every absorption must be in (t_0, t_M)
+    """
+    rx = [0] * len(snapshots)
+    for t in absorbed:
+        m = bisect.bisect_left(snapshots, t)        # the first snapshot at or after t
+        rx[m] += 1
+    return rx

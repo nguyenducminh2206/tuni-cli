@@ -1,6 +1,6 @@
 """tests for src/mi_race/channel.py"""
 
-from mi_race.channel import jump_rates, next_jump, simulate
+from mi_race.channel import jump_rates, next_jump, simulate, snapshot_times, receiver_signal
 import pytest
 import numpy as np
 
@@ -119,3 +119,41 @@ def test_same_seed_gives_the_same_run():
     a = simulate(schedule, L=4, jump_rate=2.0, T=2.0, rng=np.random.default_rng(7))
     b = simulate(schedule, L=4, jump_rate=2.0, T=2.0, rng=np.random.default_rng(7))
     assert a == b
+
+
+# 2e: snapshots and the receiver signal
+def test_snapshot_times_have_no_float_noise():
+    # without rounding, 3 * 0.1 would be 0.30000000000000004
+    assert snapshot_times(dt=0.1, n_intervals=3) == [0.0, 0.1, 0.2, 0.3]
+
+def test_snapshot_times_of_the_example():
+    snapshots = snapshot_times(dt=0.01, n_intervals=200)
+    assert len(snapshots) == 201                    # t_0 ... t_200
+    assert snapshots[-1] == 2.0 
+
+def test_no_absorptions_gives_a_flat_signal():
+    assert receiver_signal([], [0.0, 0.1, 0.2, 0.3]) == [0, 0, 0, 0]
+
+def test_absorptions_are_counted_in_their_interval():
+    snapshots = [0.0, 0.1, 0.2, 0.3]
+    absorbed = [0.05, 0.15, 0.16, 0.25]             # 1 in (0, 0.1], 2 in (0.1, 0.2], 1 in (0.2, 0.3]
+    assert receiver_signal(absorbed, snapshots) == [0, 1, 2, 1]
+
+@pytest.mark.parametrize("t, m", [
+    (0.1, 1),                                       # exactly on t_1: belongs to (0, 0.1]
+    (0.2, 2),                                       # exactly on t_2: belongs to (0.1, 0.2]
+    (0.3, 3),                                       # exactly on t_3 = T: the last interval
+])
+def test_absorption_on_a_snapshot_ends_that_interval(t, m):
+    rx = receiver_signal([t], snapshot_times(dt=0.1, n_intervals=3))
+    assert rx[m] == 1
+    assert sum(rx) == 1
+
+def test_cumulative_signal_is_the_absorbed_count():
+    # cumsum(rx) recovers A(t): the number of molecules absorbed up to each snapshot
+    rng = np.random.default_rng(0)
+    snapshots = snapshot_times(dt=0.1, n_intervals=20)
+    absorbed, _ = simulate([(0.0, 50)], L=4, jump_rate=2.0, T=snapshots[-1], rng=rng)
+    rx = receiver_signal(absorbed, snapshots)
+    assert rx[0] == 0
+    assert list(np.cumsum(rx)) == [sum(1 for a in absorbed if a <= t_m) for t_m in snapshots]
