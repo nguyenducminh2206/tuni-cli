@@ -1,9 +1,13 @@
 """tests for src/mi_race/channel.py"""
 
-from mi_race.channel import jump_rates, next_jump, simulate, snapshot_times, receiver_signal
+from mi_race.channel import jump_rates, next_jump, simulate, snapshot_times, receiver_signal, transmit
+from mi_race.config import load_config
+
 import pytest
 import numpy as np
+from pathlib import Path
 
+EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
 
 # 2b: jump rates
 def test_compartment_0_can_only_jump_right():
@@ -157,3 +161,40 @@ def test_cumulative_signal_is_the_absorbed_count():
     rx = receiver_signal(absorbed, snapshots)
     assert rx[0] == 0
     assert list(np.cumsum(rx)) == [sum(1 for a in absorbed if a <= t_m) for t_m in snapshots]
+
+
+# 2f: 1 symbol through the whole channel
+@pytest.fixture
+def cfg():
+    return load_config(EXAMPLE)
+
+def test_signal_has_one_count_per_snapshot(cfg):
+    rng = np.random.default_rng(0)
+    rx = transmit(cfg.encoder.symbols[0], cfg, rng)
+    assert len(rx) == cfg.channel.n_intervals + 1   # rx_0 ... rx_200
+    assert rx[0] == 0
+
+
+@pytest.mark.parametrize("k", [0, 1, 2, 3])
+def test_signal_never_counts_more_than_the_budget(cfg, k):
+    rng = np.random.default_rng(0)
+    rx = transmit(cfg.encoder.symbols[k], cfg, rng)
+    assert 0 <= sum(rx) <= cfg.encoder.budget
+
+def test_nothing_arrives_before_the_release(cfg):
+    rng = np.random.default_rng(0)
+    rx = transmit(cfg.encoder.symbols[3], cfg, rng)  # symbol 3 releases in slot 9, at t = 0.9 s
+    assert sum(rx[:91]) == 0                         # rx_0 ... rx_90 cover t <= 0.9 s
+    assert sum(rx) > 0
+
+def test_earlier_release_gets_more_molecules_on_average(cfg):
+    rng = np.random.default_rng(0)
+    early = [sum(transmit(cfg.encoder.symbols[0], cfg, rng)) for _ in range(200)]   # t = 0.0 s
+    late = [sum(transmit(cfg.encoder.symbols[3], cfg, rng)) for _ in range(200)]    # t = 0.9 s
+    assert sum(early) > sum(late)
+
+def test_same_seed_gives_the_same_signal(cfg):
+    vector = cfg.encoder.symbols[1]
+    a = transmit(vector, cfg, np.random.default_rng(7))
+    b = transmit(vector, cfg, np.random.default_rng(7))
+    assert a == b

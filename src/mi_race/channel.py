@@ -8,7 +8,8 @@ Compartment 0 has a reflecting wall on its left, and a jump into the receiver ab
 import numpy as np
 import bisect
 
-from mi_race.encoder import TIME_DECIMALS
+from mi_race.encoder import TIME_DECIMALS, release_schedule
+from mi_race.config import Config
 
 
 def jump_rates(counts: list[int], jump_rate: float) -> list[tuple[int, int, float]]:
@@ -87,3 +88,13 @@ def receiver_signal(absorbed: list[float], snapshots: list[float]) -> list[int]:
         m = bisect.bisect_left(snapshots, t)        # the first snapshot at or after t
         rx[m] += 1
     return rx
+
+
+def transmit(vector: tuple[int, ...], cfg: Config, rng: np.random.Generator) -> list[int]:
+    """send one symbol through the channel: its release vector -> the receiver signal rx_0 ... rx_M
+    the run ends at the last snapshot, so every absorption lands in an interval
+    """
+    schedule = release_schedule(vector, cfg.encoder.slot_dt)
+    snapshots = snapshot_times(cfg.channel.dt, cfg.channel.n_intervals)
+    absorbed, _ = simulate(schedule, cfg.channel.L, cfg.channel.jump_rate, snapshots[-1], rng)
+    return receiver_signal(absorbed, snapshots)
