@@ -1,5 +1,8 @@
 """symbols: the logic of the interactive prompt (typed lines -> release vectors -> config)"""
 
+from collections.abc import Callable
+
+
 class SymbolError(ValueError):
     """a typed release vector breaks a rule (the prompt shows the message and asks again)"""
 
@@ -19,3 +22,21 @@ def parse_vector(line: str, n_slots: int, budget: int) -> tuple[int, ...]:
     if sum(vector) != budget:
         raise SymbolError(f"the molecules add up to {sum(vector)!r}, but the budget is {budget!r}")
     return vector
+
+
+def ask_symbols(n_symbols: int, n_slots:int, budget:int, 
+                ask: Callable[[str], str]=input, show: Callable[[str], None]=print) -> tuple[tuple[int, ...], ...]:
+    """ask for one release vector per symbol; a wrong line shows the problem and asks again
+    ask and show are the keyboard and the screen by default; tests pass their own
+    """
+    show(f"type {n_slots} numbers for each symbol, adding up to {budget}")
+    vectors = []
+    for u in range(n_symbols):
+        while True:
+            line = ask(f"symbol {u}: ")
+            try:
+                vectors.append(parse_vector(line, n_slots, budget))
+                break               # this symbol is done: go to the next one
+            except SymbolError as e:
+                show(f"  {e}")      # say what is wrong, then ask again
+    return tuple(vectors)
