@@ -1,7 +1,8 @@
 """symbols: the logic of the interactive prompt (typed lines -> release vectors -> config)"""
 
 from collections.abc import Callable
-
+from pathlib import Path
+from mi_race.config import ConfigError, read_config_file, parse_config, write_config_file
 
 class SymbolError(ValueError):
     """a typed release vector breaks a rule (the prompt shows the message and asks again)"""
@@ -43,3 +44,13 @@ def ask_symbols(n_symbols: int, n_slots:int, budget:int,
             except SymbolError as e:
                 show(f"  {e}")      # say what is wrong, then ask again
     return tuple(vectors)
+
+
+def write_symbols(path: str | Path, symbols: tuple[tuple[int, ...], ...]) -> None:
+    """put new symbols into a config file; the file only changes if the whole config is still valid"""
+    raw = read_config_file(path)
+    if not isinstance(raw, dict) or not isinstance(raw.get("encoder"), dict):
+        raise ConfigError(f"{path!r} has no 'encoder' section")
+    raw["encoder"]["symbols"] = [list(vector) for vector in symbols]        # json has lists, not tuple
+    parse_config(raw)                                                       # a problem stops here, before the file is touched
+    write_config_file(path, raw)

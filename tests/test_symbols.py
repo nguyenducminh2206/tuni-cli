@@ -1,8 +1,12 @@
 """tests for src/mi_race/symbols.py"""
 
-from mi_race.symbols import SymbolError, parse_vector, ask_symbols
+from mi_race.symbols import SymbolError, parse_vector, ask_symbols, write_symbols
+from mi_race.config import ConfigError, load_config, read_config_file
 import pytest
 import io
+from pathlib import Path
+
+EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
 
 # 3a: one typed line -> a release vector
 @pytest.mark.parametrize("line, expected", [
@@ -84,3 +88,93 @@ def test_same_vector_twice_is_rejected():
     assert symbols == ((50, 0, 0, 0), (0, 50, 0, 0))
     assert keys.questions == ["symbol 0: ", "symbol 1: ", "symbol 1: "]
     assert "  symbol 1 is the same as symbol 0: no decoder could tell them apart" in screen
+
+
+# 3c: write the symbols into a config
+NEW_SYMBOLS = (
+    (25, 25, 0, 0, 0, 0, 0, 0, 0, 0),
+    (0, 0, 0, 0, 0, 25, 25, 0, 0, 0)
+)
+
+@pytest.fixture
+def config_file(tmp_path):
+    """a copy of the example config that a test is free to change"""
+    path = tmp_path / "exp.json"
+    path.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+    return path
+
+def test_new_symbols_are_saved(config_file):
+    write_symbols(config_file, NEW_SYMBOLS)
+    assert load_config(config_file).encoder.symbols == NEW_SYMBOLS
+
+def test_nothing_else_in_the_file_changes(config_file):
+    before = read_config_file(config_file)
+    write_symbols(config_file, NEW_SYMBOLS)
+    after = read_config_file(config_file)
+    del before["encoder"]["symbols"], after["encoder"]["symbols"]
+    assert after == before
+
+
+def test_each_new_symbol_stays_on_one_line(config_file):
+    write_symbols(config_file, NEW_SYMBOLS)
+    assert "[25, 25, 0, 0, 0, 0, 0, 0, 0, 0],\n" in config_file.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("symbols, message", [
+    (NEW_SYMBOLS[:1], r"at least 2"),                                       # only one symbol
+    (((50, 0, 0), (0, 0, 50)), r"has 3 entries"),                           # wrong number of slots
+    ((NEW_SYMBOLS[0], (40, 0, 0, 0, 0, 0, 0, 0, 0, 0)), r"releases 40"),    # wrong budget
+    ((NEW_SYMBOLS[0], NEW_SYMBOLS[0]), r"is the same as"),                  # duplicate
+])
+def test_bad_symbols_leave_the_file_untouched(config_file, symbols, message):
+    before = config_file.read_text(encoding="utf-8")
+    with pytest.raises(ConfigError, match=message):
+        write_symbols(config_file, symbols)
+    assert config_file.read_text(encoding="utf-8") == before
+
+
+def test_a_problem_elsewhere_leaves_the_file_untouched(config_file):
+    config_file.write_text(config_file.read_text(encoding="utf-8").replace('"T": 2.0', '"T": -2.0'), encoding="utf-8")
+    before = config_file.read_text(encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"'channel.T'"):
+        write_symbols(config_file, NEW_SYMBOLS)
+    assert config_file.read_text(encoding="utf-8") == before
+
+
+def test_old_symbols_do_not_have_to_be_valid(config_file):
+    # n_slots changed from 10 to 4: the old symbols no longer fit, the new ones replace them
+    config_file.write_text(config_file.read_text(encoding="utf-8").replace('"n_slots": 10', '"n_slots": 4'), encoding="utf-8")
+    new = ((50, 0, 0, 0), (0, 0, 0, 50))
+    write_symbols(config_file, new)
+    assert load_config(config_file).encoder.symbols == new
+
+
+def test_missing_file_is_a_config_error(tmp_path):
+    with pytest.raises(ConfigError, match=r"not found"):
+        write_symbols(tmp_path / "nope.json", NEW_SYMBOLS)
+
+
+@pytest.mark.parametrize("text", ['{"schema_version": 1}', '{"encoder": 5}', "[1, 2]"])
+def test_config_without_an_encoder_section_is_a_config_error(tmp_path, text):
+    path = tmp_path / "exp.json"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigError, match=r"has no 'encoder' section"):
+        write_symbols(path, NEW_SYMBOLS)
+    assert path.read_text(encoding="utf-8") == text
+
+
+# 3d: the whole prompt, from the keyboard to the config file
+def test_from_the_keyboard_to_the_config_file(config_file):
+    encoder = load_config(config_file).encoder
+    keys = FakeKeyboard(
+        "25 25 0 0",                                                        # too few numbers
+        "25 25 0 0 0 0 0 0 0 0",
+        "25, 25, 0, 0, 0, 0, 0, 0, 0, 0",                                   # the same vector again
+        "0 0 0 0 0 25 25 0 0 1",                                            # over the budget
+        "0 0 0 0 0 25 25 0 0 0",
+    )
+    screen = []
+    symbols = ask_symbols(2, encoder.n_slots, encoder.budget, ask=keys.ask, show=screen.append)
+    write_symbols(config_file, symbols)
+    assert load_config(config_file).encoder.symbols == NEW_SYMBOLS
+    assert len(screen) == 4                                                 # the hint and 3 complaints
