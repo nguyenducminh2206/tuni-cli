@@ -180,6 +180,8 @@ def _parse_symbols(raw: object, n_slots: int, budget: int) -> tuple[tuple[int, .
         amounts = tuple(_whole(x, f'{where}[{k}]', minimum=0) for k, x in enumerate(vector))
         if sum(amounts) != budget:
             raise ConfigError(f"{where!r} releases {sum(amounts)} molecules, but the 'budget' is {budget}")
+        if amounts in vectors:
+            raise ConfigError(f"{where!r} is the same as 'encoder.symbols[{vectors.index(amounts)}]': no decoder could tell them apart")
         vectors.append(amounts)
     return tuple(vectors)
 

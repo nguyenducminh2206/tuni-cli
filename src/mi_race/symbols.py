@@ -35,7 +35,10 @@ def ask_symbols(n_symbols: int, n_slots:int, budget:int,
         while True:
             line = ask(f"symbol {u}: ")
             try:
-                vectors.append(parse_vector(line, n_slots, budget))
+                vector = parse_vector(line, n_slots, budget)
+                if vector in vectors:
+                    raise SymbolError(f"symbol {u} is the same as symbol {vectors.index(vector)}: no decoder could tell them apart")
+                vectors.append(vector)
                 break               # this symbol is done: go to the next one
             except SymbolError as e:
                 show(f"  {e}")      # say what is wrong, then ask again

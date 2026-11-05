@@ -238,6 +238,10 @@ def test_every_symbol_uses_the_whole_budget():
     with pytest.raises(ConfigError, match=r"'encoder.symbols\[1\]' releases 40 molecules, but the 'budget' is 50"):
         _parse_symbols([[50, 0, 0], [0, 40, 0]], n_slots=3, budget=50)
 
+def test_two_symbols_cannot_be_the_same():
+    with pytest.raises(ConfigError, match=r"'encoder.symbols\[2\]' is the same as 'encoder.symbols\[0\]'"):
+        _parse_symbols([[50, 0, 0], [0, 50, 0], [50, 0, 0]], n_slots=3, budget=50)
+
 
 # 8b: the encoder section
 @pytest.fixture

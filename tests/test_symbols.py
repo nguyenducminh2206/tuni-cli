@@ -76,3 +76,11 @@ def test_uses_the_real_keyboard_and_screen_by_default(monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO("50 0 0 0\n0 0 0 50\n"))
     assert ask_symbols(n_symbols=2, n_slots=4, budget=50) == ((50, 0, 0, 0), (0, 0, 0, 50))
     assert "symbol 1: " in capsys.readouterr().out
+
+def test_same_vector_twice_is_rejected():
+    keys = FakeKeyboard("50 0 0 0", "50, 0, 0, 0", "0 50 0 0")      # the same vector, typed differently
+    screen = []
+    symbols = ask_symbols(n_symbols=2, n_slots=4, budget=50, ask=keys.ask, show=screen.append)
+    assert symbols == ((50, 0, 0, 0), (0, 50, 0, 0))
+    assert keys.questions == ["symbol 0: ", "symbol 1: ", "symbol 1: "]
+    assert "  symbol 1 is the same as symbol 0: no decoder could tell them apart" in screen
