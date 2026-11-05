@@ -50,7 +50,7 @@ def write_symbols(path: str | Path, symbols: tuple[tuple[int, ...], ...]) -> Non
     """put new symbols into a config file; the file only changes if the whole config is still valid"""
     raw = read_config_file(path)
     if not isinstance(raw, dict) or not isinstance(raw.get("encoder"), dict):
-        raise ConfigError(f"{path!r} has no 'encoder' section")
+        raise ConfigError(f"{path} has no 'encoder' section")
     raw["encoder"]["symbols"] = [list(vector) for vector in symbols]        # json has lists, not tuple
     parse_config(raw)                                                       # a problem stops here, before the file is touched
     write_config_file(path, raw)
