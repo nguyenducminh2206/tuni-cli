@@ -35,10 +35,7 @@ symbols (config or prompt) → encoder (release schedule) → SSA channel
 ## Encoder (release vectors)
 
 - Symbol u has a release vector r_u of n_slots non-negative integers, with Σ r_u = B for every u.
-- 
 - Slot k releases r_u[k] molecules into compartment 0 at t = k · slot_dt, and every slot satisfies t < T.
-
-- No two symbols are the same (no decoder could tell them apart).
 
 - No two symbols are the same (no decoder could tell them apart).
 
