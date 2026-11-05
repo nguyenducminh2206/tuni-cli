@@ -8,7 +8,7 @@ import warnings
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
                             _parse_channel, _parse_symbols, _parse_encoder, _parse_data, _parse_output,
-                            _parse_decoders, parse_config, load_config)
+                            _parse_decoders, parse_config, load_config, write_config_file)
 
 
 # 3a: ChannelConfig
@@ -410,3 +410,30 @@ def test_load_config_names_the_file(tmp_path, example_raw):
     path.write_text(json.dumps(example_raw))
     with pytest.raises(ConfigError, match="my_experiment.json: 'channel.L' must be at least 2"):
         load_config(path)
+
+
+# 3c: write_config_file
+def test_written_config_reads_back_the_same(tmp_path):
+    path = tmp_path / "new.json"
+    raw = read_config_file(EXAMPLE)
+    write_config_file(path, raw)
+    assert read_config_file(path) == raw
+
+def test_written_example_looks_like_the_example(tmp_path):
+    path = tmp_path / "new.json"
+    write_config_file(path, read_config_file(EXAMPLE))
+    assert path.read_text(encoding="utf-8").strip() == EXAMPLE.read_text(encoding="utf-8").strip()
+
+def test_lists_of_numbers_stay_on_one_line(tmp_path):
+    path = tmp_path / "new.json"
+    write_config_file(path, {"a": [1, 2.5, -3], "b": [[1, 2], [3, 4]]})
+    text = path.read_text(encoding="utf-8")
+    assert '"a": [1, 2.5, -3]' in text
+    assert "[1, 2],\n" in text
+    assert "[3, 4]\n" in text
+
+def test_brackets_inside_a_path_are_left_alone(tmp_path):
+    path = tmp_path / "new.json"
+    raw = {"path": "data/[ 1, 2 ].csv"}
+    write_config_file(path, raw)
+    assert read_config_file(path) == raw

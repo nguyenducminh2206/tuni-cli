@@ -9,6 +9,8 @@ import json
 import difflib
 import math
 import warnings
+import re
+
 
 SCHEMA_VERSION = 1
 RECOMMENDED_RUNS = 300
@@ -94,6 +96,12 @@ def read_config_file(path: str | Path) -> dict:
         return json.loads(text, object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as e:
         raise ConfigError(f"{path} is not valid json: {e}") from None
+
+def write_config_file(path: str | Path, raw: dict) -> None:
+    """write a config dict as json: indented, with each list of plain numbers on one line"""
+    text = json.dumps(raw, indent=2, ensure_ascii=False)
+    text = re.sub(r"\[\n\s+([-\d.,\s]+?)\n\s+\]", lambda m: "[" + " ".join(m[1].split()) + "]", text)
+    Path(path).write_text(text + "\n", encoding="utf-8")
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
