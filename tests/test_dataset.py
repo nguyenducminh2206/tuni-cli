@@ -7,7 +7,7 @@ import pytest
 
 from mi_race.channel import transmit
 from mi_race.config import load_config
-from mi_race.dataset import simulate_dataset
+from mi_race.dataset import simulate_dataset, write_dataset
 from mi_race.streams import random_stream
 
 EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
@@ -69,3 +69,35 @@ def test_mean_absorbed_matches_the_exact_values():
     totals = rows[:, 1:].sum(axis=1)
     means = [totals[rows[:, 0] == u].mean() for u in range(4)]
     assert means == pytest.approx([22.40, 18.95, 15.13, 10.99], abs=1.0)
+
+
+# 4c: write the csv
+def test_csv_looks_like_this(tmp_path):
+    path = tmp_path / "small.csv"
+    write_dataset(path, np.array([[0, 0, 1, 2], [1, 0, 0, 3]]))
+    assert path.read_text() == "symbol,rx_0,rx_1,rx_2\n0,0,1,2\n1,0,0,3\n"
+
+def test_example_csv_has_a_header_and_one_line_per_run(cfg, tmp_path):
+    path = tmp_path / "example.csv"
+    write_dataset(path, simulate_dataset(cfg))
+    lines = path.read_text().splitlines()
+    assert lines[0].startswith("symbol,rx_0,rx_1,")
+    assert lines[0].endswith(",rx_200")
+    assert len(lines) == 1 + 4 * 20
+
+def test_csv_reads_back_the_same_numbers(cfg, tmp_path):
+    path = tmp_path / "example.csv"
+    rows = simulate_dataset(cfg)
+    write_dataset(path, rows)
+    assert np.array_equal(np.loadtxt(path, delimiter=",", skiprows=1, dtype=int), rows)
+
+def test_missing_folders_are_created(tmp_path):
+    path = tmp_path / "data" / "new" / "x.csv"
+    write_dataset(path, np.array([[0, 0, 1], [1, 0, 2]]))
+    assert path.exists()
+
+def test_writing_again_replaces_the_file(tmp_path):
+    path = tmp_path / "x.csv"
+    write_dataset(path, np.array([[0, 0, 1], [1, 0, 2]]))
+    write_dataset(path, np.array([[0, 0, 5], [1, 0, 6]]))
+    assert path.read_text() == "symbol,rx_0,rx_1\n0,0,5\n1,0,6\n"
