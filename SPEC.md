@@ -81,9 +81,10 @@ rx_m = A(t_m) - A(t_{m-1}),   m = 1 … M
 ## Data
 
 - `runs_per_symbol` defaults to 300. Dataset columns: `symbol, rx_0 … rx_M`.
-- One master seed, from which every simulation run gets its own seed.
 - A stratified train/test split (`test_fraction`, default 0.2) is made once and
   shared by every decoder.
+
+- One master seed. Every job (each simulation run, the split, each decoder) gets its own independent random stream from it.
 
 ## Decoders
 
