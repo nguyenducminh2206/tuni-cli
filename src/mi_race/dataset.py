@@ -18,7 +18,7 @@ def simulate_dataset(cfg: Config) -> np.ndarray:
     return np.array(rows)
 
 def write_dataset(path: str | Path, rows: np.ndarray) -> None:
-    """save the datasett as csv: a header line 'symbol, rx_0, ..., rx_M', then one line per run"""
+    """save the dataset as csv: a header line 'symbol, rx_0, ..., rx_M', then one line per run"""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)      # e.g. create data/ the first time
     header = ",".join(["symbol"] + [f"rx_{m}" for m in range(rows.shape[1] - 1)])
