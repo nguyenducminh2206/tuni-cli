@@ -35,7 +35,12 @@ symbols (config or prompt) → encoder (release schedule) → SSA channel
 ## Encoder (release vectors)
 
 - Symbol u has a release vector r_u of n_slots non-negative integers, with Σ r_u = B for every u.
+- 
 - Slot k releases r_u[k] molecules into compartment 0 at t = k · slot_dt, and every slot satisfies t < T.
+
+- No two symbols are the same (no decoder could tell them apart).
+
+- No two symbols are the same (no decoder could tell them apart).
 
 ## Channel
 
@@ -83,7 +88,6 @@ rx_m = A(t_m) - A(t_{m-1}),   m = 1 … M
 - `runs_per_symbol` defaults to 300. Dataset columns: `symbol, rx_0 … rx_M`.
 - A stratified train/test split (`test_fraction`, default 0.2) is made once and
   shared by every decoder.
-
 - One master seed. Every job (each simulation run, the split, each decoder) gets its own independent random stream from it.
 
 ## Decoders
