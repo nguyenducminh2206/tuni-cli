@@ -7,7 +7,7 @@ import pytest
 
 from mi_race.channel import transmit
 from mi_race.config import load_config
-from mi_race.dataset import simulate_dataset, write_dataset, mean_signals
+from mi_race.dataset import DatasetError, simulate_dataset, write_dataset, mean_signals, read_dataset
 from mi_race.streams import random_stream
 
 EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
@@ -127,3 +127,52 @@ def test_mean_signal_is_zero_until_the_release(cfg):
         release = 30 * u                            # symbol u releases at 0.3 * u s = t_(30 u)
         assert means[u, :release + 1].sum() == 0    # rx_0 ... rx_release
         assert means[u].sum() > 0
+
+
+# 5a: read the dataset back
+def csv_file(tmp_path, text):
+    """a csv file with this text"""
+    path = tmp_path / "data.csv"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+def test_read_gives_back_what_was_written(cfg, tmp_path):
+    rows = simulate_dataset(cfg)
+    write_dataset(tmp_path / "data.csv", rows)
+    assert np.array_equal(read_dataset(tmp_path / "data.csv"), rows)     # same shape, same numbers
+
+def test_one_run_is_still_a_table(tmp_path):
+    path = csv_file(tmp_path, "symbol,rx_0,rx_1\n0,0,3\n")
+    assert read_dataset(path).tolist() == [[0, 0, 3]]
+
+def test_missing_file(tmp_path):
+    with pytest.raises(DatasetError, match="not found"):
+        read_dataset(tmp_path / "nothing.csv")
+
+@pytest.mark.parametrize("text", [
+    "",                                         # empty file
+    "0,0,1\n1,0,2\n",                           # no header
+    "label,rx_0,rx_1\n0,0,1\n",                 # another name
+    "symbol,rx_0,rx_2\n0,0,1\n",                # rx_1 missing
+    "symbol, rx_0, rx_1\n0,0,1\n",              # spaces
+])
+def test_wrong_header(tmp_path, text):
+    with pytest.raises(DatasetError, match="must start with the line"):
+        read_dataset(csv_file(tmp_path, text))
+
+
+def test_header_but_no_runs(tmp_path):
+    with pytest.raises(DatasetError, match="no runs"):
+        read_dataset(csv_file(tmp_path, "symbol,rx_0,rx_1\n"))
+
+
+@pytest.mark.parametrize("lines", [
+    "0,0,1.5\n",                                # not a whole number
+    "0,0,x\n",                                  # not a number
+    "0,0,-1\n",                                 # negative
+    "0,0,1\n1,0\n",                             # a line is too short
+    "0,0,1,2\n",                                # more values than the header has names
+])
+def test_bad_lines(tmp_path, lines):
+    with pytest.raises(DatasetError, match="3 whole numbers"):
+        read_dataset(csv_file(tmp_path, "symbol,rx_0,rx_1\n" + lines))

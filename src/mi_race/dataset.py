@@ -28,3 +28,30 @@ def mean_signals(rows: np.ndarray) -> np.ndarray:
     """the mean receiver signal of each symbol: row u is rx_0 ... rx_M averaged over the runs of symbol u"""
     symbols = rows[:, 0]
     return np.array([rows[symbols == u, 1:].mean(axis=0) for u in range(symbols.max() + 1)])
+
+
+class DatasetError(ValueError):
+    """the dataset file is missing, broken, or does not match the config"""
+
+
+def read_dataset(path:str | Path) -> np.ndarray:
+    """read a csv saved by write_dataset back into a table of whole numbers"""
+    path = Path(path)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        raise DatasetError(f"dataset file not found: {path}") from None
+    header = lines[0] if lines else ""      # an empty file has no lines at all
+    names = header.split(",")
+    if names != ["symbol"] + [f"rx_{m}" for m in range(len(names) - 1)]:
+        raise DatasetError(f"{path} must start with the line 'symbol, rx_0, ..., rx_M'")
+    if len(lines) == 1:
+        raise DatasetError(f"{path} has no runs, only the header line")
+    rule = f"every line after the first must be {len(names)} whole numbers ≧ 0, separated by commas"
+    try:
+        rows = np.loadtxt(lines[1:], delimiter=",", dtype=int, ndmin=2)
+    except ValueError:
+        raise DatasetError(f"{path}: {rule}") from None
+    if rows.shape[1] != len(names) or (rows < 0).any():
+        raise DatasetError(f"{path}: {rule}")
+    return rows
