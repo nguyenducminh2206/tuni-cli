@@ -23,3 +23,8 @@ def write_dataset(path: str | Path, rows: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)      # e.g. create data/ the first time
     header = ",".join(["symbol"] + [f"rx_{m}" for m in range(rows.shape[1] - 1)])
     np.savetxt(path, rows, fmt="%d", delimiter=",", header=header, comments="")
+
+def mean_signals(rows: np.ndarray) -> np.ndarray:
+    """the mean receiver signal of each symbol: row u is rx_0 ... rx_M averaged over the runs of symbol u"""
+    symbols = rows[:, 0]
+    return np.array([rows[symbols == u, 1:].mean(axis=0) for u in range(symbols.max() + 1)])

@@ -7,7 +7,7 @@ import pytest
 
 from mi_race.channel import transmit
 from mi_race.config import load_config
-from mi_race.dataset import simulate_dataset, write_dataset
+from mi_race.dataset import simulate_dataset, write_dataset, mean_signals
 from mi_race.streams import random_stream
 
 EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
@@ -101,3 +101,29 @@ def test_writing_again_replaces_the_file(tmp_path):
     write_dataset(path, np.array([[0, 0, 1], [1, 0, 2]]))
     write_dataset(path, np.array([[0, 0, 5], [1, 0, 6]]))
     assert path.read_text() == "symbol,rx_0,rx_1\n0,0,5\n1,0,6\n"
+
+
+# 4d: the mean signal of each symbol
+def test_mean_signals_of_a_small_table():
+    rows = np.array([
+        [0, 0, 1, 2],
+        [0, 0, 3, 4],
+        [1, 0, 5, 0],
+    ])
+    assert mean_signals(rows).tolist() == [[0, 2, 3], [0, 5, 0]]
+
+def test_one_mean_signal_per_symbol(cfg):
+    assert mean_signals(simulate_dataset(cfg)).shape == (4, 201)        # 4 symbols, rx_0 ... rx_200
+
+def test_mean_signal_adds_up_to_the_mean_absorbed(cfg):
+    rows = simulate_dataset(cfg)
+    totals = rows[:, 1:].sum(axis=1)
+    expected = [totals[rows[:, 0] == u].mean() for u in range(4)]
+    assert mean_signals(rows).sum(axis=1) == pytest.approx(expected)
+
+def test_mean_signal_is_zero_until_the_release(cfg):
+    means = mean_signals(simulate_dataset(cfg))
+    for u in range(4):
+        release = 30 * u                            # symbol u releases at 0.3 * u s = t_(30 u)
+        assert means[u, :release + 1].sum() == 0    # rx_0 ... rx_release
+        assert means[u].sum() > 0
