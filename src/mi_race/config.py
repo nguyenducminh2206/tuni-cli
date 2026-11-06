@@ -151,6 +151,12 @@ def _positive(value: object, where: str) -> float:
         raise ConfigError(f"{where!r} must be a finite number greater than 0, got {value}")
     return float(value)
 
+def _whole_list(value: object, where: str) -> tuple[int, ...]:
+    """a non-empty list of whole number >= 1, such as layer sizes, returned as a tuple, or ConfigError"""
+    if not isinstance(value, list) or not value:
+        raise ConfigError(f"{where!r} must be a non-empty list of whole numbers like [128, 128], got {value!r}")
+    return tuple(_whole(x, f"{where}[{k}]", minimum=1) for k, x in enumerate(value))
+
 
 def _parse_channel(raw:object) -> ChannelConfig:
     """check the channel section and build a ChannelConfig"""
@@ -241,12 +247,30 @@ def _parse_output(raw: object) -> OutputConfig:
     return OutputConfig(dir=directory)
 
 
-def _parse_decoders(raw: object) -> dict:
-    """check decoder names and their setting names; the values are checked in step 5"""
-    _check_keys(raw, "decoders", required=(), optional=tuple(DECODER_FIELDS))
+def _parse_decoders(raw: object, channel: ChannelConfig) -> dict:
+    """check each decoder's settings and build its settings class; a setting left out gets its default"""
+    _check_keys(raw, "decoders", required=(), optional=tuple(DECODERS))
+    decoders = {}
     for name, settings in raw.items():
         _check_keys(settings, f"decoders.{name}", required=(), optional=DECODER_FIELDS[name])
-    return {name: dict(settings) for name, settings in raw.items()}
+        values = {}
+        for key, value in settings.items():
+            where = f"decoders.{name}.{key}"
+            if key in ("hidden_layers", "channels"):
+                values[key] = _whole_list(value, where)
+            elif key == "lr":
+                values[key] = _positive(value, where)
+            else:                                                   # n_estimators, epochs, batch_size, kernel_size
+                values[key] = _whole(value, where, minimum=1)
+        decoders[name] = DECODERS[name](**values)
+
+    cnn = decoders.get("cnn")
+    n_values = channel.n_intervals + 1          # rx_0 ... rx_M
+    if cnn is not None and (cnn.kernel_size % 2 == 0 or cnn.kernel_size > n_values):
+        raise ConfigError(
+            f"'decoders.cnn.kernel_size' must be odd and at most {n_values} (the rx values per run), got {cnn.kernel_size}"
+        )
+    return decoders
 
 
 def load_config(path: str | Path) -> Config:
@@ -276,7 +300,7 @@ def parse_config(raw: object) -> Config:
         encoder=_parse_encoder(raw["encoder"], channel),
         data=_parse_data(raw["data"]),
         seed=_whole(raw.get("seed", Config.seed), "seed", minimum=0),
-        decoders=_parse_decoders(raw.get("decoders", {})),
+        decoders=_parse_decoders(raw.get("decoders", {}), channel),
         output=_parse_output(raw.get("output", {}))
     )
 

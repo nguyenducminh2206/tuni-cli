@@ -341,25 +341,28 @@ def test_output_dir_must_be_a_non_empty_text(directory):
     with pytest.raises(ConfigError, match="'output.dir' must be a folder path"):
         _parse_output({"dir": directory})
 
+def parse_decoders(raw):
+    """_parse_decoders with the example channel, which gives 201 rx values per run"""
+    return _parse_decoders(raw, ChannelConfig(L=4, h=1.0, D=2.0, dt=0.01, T=2.0))
+
 def test_decoders_from_the_example(example_raw):
-    decoders = _parse_decoders(example_raw["decoders"])
-    assert set(decoders) == {"random_forest", "mlp", "cnn"}
-    assert decoders["mlp"]["hidden_layers"] == [128, 128]
+    decoders = parse_decoders(example_raw["decoders"])
+    assert decoders == {"random_forest": RandomForestConfig(), "mlp": MLPConfig(), "cnn": CNNConfig()}
 
 def test_no_decoders_is_allowed():
-    assert _parse_decoders({}) == {}
+    assert parse_decoders({}) == {}
 
 def test_unknown_decoder():
     with pytest.raises(ConfigError, match="unknown key 'rnn' in 'decoders'"):
-        _parse_decoders({"rnn": {}})
+        parse_decoders({"rnn": {}})
 
 def test_typo_in_a_decoder_setting():
     with pytest.raises(ConfigError, match="Did you mean 'hidden_layers'"):
-        _parse_decoders({"mlp": {"hiden_layers": [64]}})
+        parse_decoders({"mlp": {"hiden_layers": [64]}})
 
 def test_decoder_settings_must_be_an_object():
     with pytest.raises(ConfigError, match="'decoders.cnn' must be a json object"):
-        _parse_decoders({"cnn": 5})
+        parse_decoders({"cnn": 5})
 
 
 # 10: the whole config
@@ -467,3 +470,47 @@ def test_decoder_settings_cannot_be_changed():
         mlp.epochs = 5
     with pytest.raises(AttributeError):                     # a tuple has no append
         mlp.hidden_layers.append(64)
+
+
+# 5b: decoder setting values
+def test_left_out_settings_get_their_defaults():
+    decoders = parse_decoders({"mlp": {"epochs": 100}, "cnn": {}})
+    assert decoders == {"mlp": MLPConfig(epochs=100), "cnn": CNNConfig()}
+
+
+def test_layer_lists_become_tuples():
+    assert parse_decoders({"cnn": {"channels": [8, 16, 32]}})["cnn"].channels == (8, 16, 32)
+
+
+@pytest.mark.parametrize("name, key, value, message", [
+    ("random_forest", "n_estimators", 0, "'decoders.random_forest.n_estimators' must be at least 1"),
+    ("mlp", "epochs", 2.5, "'decoders.mlp.epochs' must be a whole number"),
+    ("mlp", "batch_size", True, "'decoders.mlp.batch_size' must be a whole number"),
+    ("mlp", "lr", 0, "'decoders.mlp.lr' must be a finite number greater than 0"),
+    ("cnn", "lr", "0.001", "'decoders.cnn.lr' must be a number"),
+    ("mlp", "hidden_layers", [], "'decoders.mlp.hidden_layers' must be a non-empty list"),
+    ("mlp", "hidden_layers", 128, "'decoders.mlp.hidden_layers' must be a non-empty list"),
+    ("mlp", "hidden_layers", [128, 0], r"'decoders.mlp.hidden_layers\[1\]' must be at least 1"),
+    ("cnn", "channels", [16, 2.5], r"'decoders.cnn.channels\[1\]' must be a whole number"),
+    ("cnn", "kernel_size", 0, "'decoders.cnn.kernel_size' must be at least 1"),
+])
+def test_bad_setting_values(name, key, value, message):
+    with pytest.raises(ConfigError, match=message):
+        parse_decoders({name: {key: value}})
+
+
+@pytest.mark.parametrize("kernel_size", [4, 203])         # even, longer than the 201 rx values
+def test_kernel_must_be_odd_and_fit_in_the_signal(kernel_size):
+    with pytest.raises(ConfigError, match="must be odd and at most 201"):
+        parse_decoders({"cnn": {"kernel_size": kernel_size}})
+
+
+def test_kernel_as_long_as_the_signal_is_allowed():
+    assert parse_decoders({"cnn": {"kernel_size": 201}})["cnn"].kernel_size == 201
+
+
+def test_kernel_rule_uses_the_configs_own_signal(example_raw):
+    example_raw["channel"]["dt"] = 0.5                      # T / dt = 4, so rx_0 ... rx_4: 5 values
+    example_raw["decoders"]["cnn"]["kernel_size"] = 7
+    with pytest.raises(ConfigError, match="must be odd and at most 5"):
+        parse_config(example_raw)
