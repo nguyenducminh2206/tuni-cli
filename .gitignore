@@ -21,6 +21,11 @@ PLAN.md
 AGENTS.md
 ROADMAP.md
 
+# Private planning notes (local only)
+SPEC.md
+TUNING_PLAN.md
+NOTES.md
+
 # Project outputs and scratch directories — all local-only.
 outputs/
 mi-race/outputs/
