@@ -8,7 +8,8 @@ import warnings
 from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigError,
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
                             _parse_channel, _parse_symbols, _parse_encoder, _parse_data, _parse_output,
-                            _parse_decoders, parse_config, load_config, write_config_file)
+                            _parse_decoders, parse_config, load_config, write_config_file, RandomForestConfig,
+                            MLPConfig, CNNConfig, DECODERS, DECODER_FIELDS)
 
 
 # 3a: ChannelConfig
@@ -437,3 +438,32 @@ def test_brackets_inside_a_path_are_left_alone(tmp_path):
     raw = {"path": "data/[ 1, 2 ].csv"}
     write_config_file(path, raw)
     assert read_config_file(path) == raw
+
+
+# 5b: decoder settings
+def test_decoder_defaults():
+    assert RandomForestConfig() == RandomForestConfig(n_estimators=200)
+    assert MLPConfig() == MLPConfig(hidden_layers=(128, 128), epochs=30, lr=0.001, batch_size=64)
+    assert CNNConfig() == CNNConfig(channels=(16, 32), kernel_size=5, epochs=30, lr=0.001, batch_size=64)
+
+
+def test_the_example_lists_every_setting_with_its_default(example_raw):
+    for name, settings in DECODERS.items():
+        defaults = json.loads(json.dumps(dataclasses.asdict(settings())))     # tuples become lists, as in the file
+        assert example_raw["decoders"][name] == defaults
+
+
+def test_setting_names_come_from_the_classes():
+    assert DECODER_FIELDS == {
+        "random_forest": ("n_estimators",),
+        "mlp": ("hidden_layers", "epochs", "lr", "batch_size"),
+        "cnn": ("channels", "kernel_size", "epochs", "lr", "batch_size"),
+    }
+
+
+def test_decoder_settings_cannot_be_changed():
+    mlp = MLPConfig()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        mlp.epochs = 5
+    with pytest.raises(AttributeError):                     # a tuple has no append
+        mlp.hidden_layers.append(64)

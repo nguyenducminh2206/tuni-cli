@@ -3,7 +3,7 @@ Load a config file and check it against the rules in SPEC.md
 (config validation)
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 import json
 import difflib
@@ -15,11 +15,7 @@ import re
 SCHEMA_VERSION = 1
 RECOMMENDED_RUNS = 300
 _TOL = 1e-9
-DECODER_FIELDS = {
-    "random_forest": ("n_estimators",),
-    "mlp": ("hidden_layers", "epochs", "lr", "batch_size"),
-    "cnn": ("channels", "kernel_size", "epochs", "lr", "batch_size")
-}
+
 
 
 class ConfigError(ValueError):
@@ -283,3 +279,32 @@ def parse_config(raw: object) -> Config:
         decoders=_parse_decoders(raw.get("decoders", {})),
         output=_parse_output(raw.get("output", {}))
     )
+
+
+@dataclass(frozen=True)
+class RandomForestConfig:
+    """decoder.random_forest: the baseline, a forest of decision trees on the raw counts"""
+    n_estimators: int = 200             # number of trees
+
+
+@dataclass(frozen=True)
+class MLPConfig:
+    """decoders.mlp: a fully connected network, each rx_m is 1 input"""
+    hidden_layers: tuple[int, ...] = (128, 128)         # neurons in each hidden layers
+    epochs: int = 30                                    # passes over the training rows
+    lr: float = 0.001                                   # learning rate
+    batch_size: int = 64                                # training rows per update
+
+
+@dataclass(frozen=True)
+class CNNConfig:
+    """decoders.cnn: a 1-d convolutional network that reads the signal as a curve over time"""
+    channels: tuple[int, ...] = (16, 32)        # filters in each convolution layer
+    kernel_size: int = 5                        # neighbouring rx values each filter looks at
+    epochs: int = 30
+    lr: float = 0.001
+    batch_size: int = 64
+
+
+DECODERS = {"random_forest": RandomForestConfig, "mlp": MLPConfig, "cnn": CNNConfig}
+DECODER_FIELDS = {name: tuple(f.name for f in fields(settings)) for name, settings in DECODERS.items()}
