@@ -55,3 +55,24 @@ def read_dataset(path:str | Path) -> np.ndarray:
     if rows.shape[1] != len(names) or (rows < 0).any():
         raise DatasetError(f"{path}: {rule}")
     return rows
+
+
+def check_dataset(rows: np.ndarray, cfg: Config) -> None:
+    """make sure the rows read from config.data.path fit this config: rx cols, symbol numbers, runs per symbol"""
+    path, again = cfg.data.path, "simulate it again with this config"
+    n_values = cfg.channel.n_intervals + 1
+    if rows.shape[1] - 1 != n_values:
+        raise DatasetError(
+            f"{path} has {rows.shape[1] - 1} rx values per run, but the config needs {n_values} (T/dt + 1): {again}"
+        )
+    n_symbols, symbols = cfg.encoder.n_symbols, rows[:, 0]
+    if symbols.max() >= n_symbols:
+        raise DatasetError(
+            f"{path} has runs of symbol {symbols.max()}, but the config has only symbols 0 ... {n_symbols - 1}: {again}"
+        )
+    for u, runs in enumerate(np.bincount(symbols, minlength=n_symbols)):
+        if runs != cfg.data.runs_per_symbol:
+            raise DatasetError(
+                f"{path} has {runs} runs of symbol {u}, but 'data.runs_per_symbol' is {cfg.data.runs_per_symbol}: {again}"
+            )
+        

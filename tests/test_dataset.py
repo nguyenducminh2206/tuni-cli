@@ -7,7 +7,7 @@ import pytest
 
 from mi_race.channel import transmit
 from mi_race.config import load_config
-from mi_race.dataset import DatasetError, simulate_dataset, write_dataset, mean_signals, read_dataset
+from mi_race.dataset import DatasetError, simulate_dataset, write_dataset, mean_signals, read_dataset, check_dataset
 from mi_race.streams import random_stream
 
 EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
@@ -176,3 +176,43 @@ def test_header_but_no_runs(tmp_path):
 def test_bad_lines(tmp_path, lines):
     with pytest.raises(DatasetError, match="3 whole numbers"):
         read_dataset(csv_file(tmp_path, "symbol,rx_0,rx_1\n" + lines))
+
+
+
+# 5a: the dataset must fit the config
+def edited(cfg, section, **changes):
+    """the same config with some values of one section changed, as if the file was edited after simulating"""
+    return dataclasses.replace(cfg, **{section: dataclasses.replace(getattr(cfg, section), **changes)})
+
+
+def test_the_dataset_of_this_config_fits(cfg):
+    check_dataset(simulate_dataset(cfg), cfg)               # no error
+
+
+@pytest.mark.parametrize("changes, needed", [
+    ({"T": 1.5}, 151),                                      # shorter: rx_0 ... rx_150
+    ({"dt": 0.02}, 101),                                    # coarser: rx_0 ... rx_100
+])
+def test_other_snapshots(cfg, changes, needed):
+    with pytest.raises(DatasetError, match=f"201 rx values per run, but the config needs {needed}"):
+        check_dataset(simulate_dataset(cfg), edited(cfg, "channel", **changes))
+
+
+def test_fewer_symbols_in_the_config(cfg):
+    fewer = edited(cfg, "encoder", symbols=cfg.encoder.symbols[:3])
+    with pytest.raises(DatasetError, match="runs of symbol 3, but the config has only symbols 0 ... 2"):
+        check_dataset(simulate_dataset(cfg), fewer)
+
+def test_more_symbols_in_the_config(cfg):
+    more = edited(cfg, "encoder", symbols=cfg.encoder.symbols + ((0, 50, 0, 0, 0, 0, 0, 0, 0, 0),))
+    with pytest.raises(DatasetError, match="0 runs of symbol 4"):
+        check_dataset(simulate_dataset(cfg), more)
+
+def test_other_runs_per_symbol(cfg):
+    with pytest.raises(DatasetError, match="20 runs of symbol 0, but 'data.runs_per_symbol' is 30"):
+        check_dataset(simulate_dataset(cfg), with_runs(cfg, 30))
+
+def test_runs_missing_at_the_end(cfg):
+    rows = simulate_dataset(cfg)[:-5]                       # the last 5 runs of symbol 3 are gone
+    with pytest.raises(DatasetError, match="15 runs of symbol 3"):
+        check_dataset(rows, cfg)
