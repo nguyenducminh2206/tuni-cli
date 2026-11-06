@@ -98,8 +98,10 @@ rx_m = A(t_m) - A(t_{m-1}),   m = 1 … M
   (this keeps the shape of the signal over time), applied to training and test rows.
 - CPU by default. NumPy, scikit-learn and PyTorch are seeded, with PyTorch
   deterministic mode on. "Same result" means same machine, same environment, CPU.
-- Hyperparameters come from the config and are never tuned on the test set. If
-  tuning is added, it uses a validation split carved from the training data.
+- Hyperparameters come from the config. Every decoder setting has a default, equal to its
+  value in `configs/example.json`. They are never tuned on the test set.
+- Each decoder trains from its own settings and a random generator (not the whole config),
+  fits its scaler inside training, and gives a probability for every symbol.
 
 ## Metrics (on the test set)
 
@@ -117,6 +119,25 @@ rx_m = A(t_m) - A(t_{m-1}),   m = 1 … M
   by roughly (N-1)² / (2 · n_test · ln 2) bits, so `n_test` is always reported with it.
 - Later, for probabilistic decoders, the Barber–Agakov lower bound on I(U;Y):
   I_BA = log₂ N + mean(log₂ pθ(U | Y)).
+
+## Tuning (optional, step 6b)
+
+The full plan is in [TUNING_PLAN.md](TUNING_PLAN.md).
+
+- Only the training rows are used; the test set is used once, for the final result.
+- Each trial is scored by stratified 5-fold cross-validation on the training rows
+  (every fold holds out the same number of runs per symbol).
+- Objective: mean validation log-loss over the folds (lower is better); accuracy is
+  recorded too. Zero probabilities are clipped before the log.
+- `epochs` is tuned; no early stopping.
+- Every decoder gets the same number of trials. Trials run one after another, all with
+  the same model stream, so they differ only in their settings.
+- Two more random streams, added at the end of the job list: `validation` (folds) and
+  `tuning` (the sampler).
+- The chosen settings are retrained on all training rows and saved to a new config file;
+  the original config is never overwritten. Training and validation scores are reported
+  as an overfitting check.
+- Optuna is an optional dependency; mi-race runs without it.
 
 ## Config validation (step 1): reject before simulating
 
