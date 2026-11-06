@@ -7,7 +7,7 @@ import pytest
 
 from mi_race.channel import transmit
 from mi_race.config import load_config
-from mi_race.dataset import DatasetError, simulate_dataset, write_dataset, mean_signals, read_dataset, check_dataset
+from mi_race.dataset import DatasetError, simulate_dataset, write_dataset, mean_signals, read_dataset, check_dataset, split_dataset
 from mi_race.streams import random_stream
 
 EXAMPLE = Path(__file__).parents[1] / "configs" / "example.json"
@@ -216,3 +216,50 @@ def test_runs_missing_at_the_end(cfg):
     rows = simulate_dataset(cfg)[:-5]                       # the last 5 runs of symbol 3 are gone
     with pytest.raises(DatasetError, match="15 runs of symbol 3"):
         check_dataset(rows, cfg)
+
+
+# 5a: the stratified split
+def numbered_table(n_symbols, runs):
+    """a fake dataset: column 0 is the symbol, column 1 numbers the rows 0, 1, 2, ... so each run can be followed"""
+    return np.column_stack([np.repeat(np.arange(n_symbols), runs), np.arange(n_symbols * runs)])
+
+
+def split(rows, test_fraction=0.2, seed=12345):
+    return split_dataset(rows, test_fraction, random_stream(seed, "split"))
+
+
+@pytest.mark.parametrize("runs, test_fraction, n_test", [
+    (20, 0.2, 4),
+    (300, 0.2, 60),                                         # the example config
+    (7, 0.3, 2),                                            # 2.1 rounds to 2
+    (7, 0.4, 3),                                            # 2.8 rounds to 3
+])
+def test_every_symbol_gets_the_same_number_of_test_runs(runs, test_fraction, n_test):
+    train, test = split(numbered_table(4, runs), test_fraction)
+    assert np.bincount(test[:, 0]).tolist() == [n_test] * 4
+    assert np.bincount(train[:, 0]).tolist() == [runs - n_test] * 4
+
+
+def test_every_run_lands_in_exactly_one_part():
+    train, test = split(numbered_table(4, 20))
+    assert sorted(train[:, 1].tolist() + test[:, 1].tolist()) == list(range(80))
+
+
+def test_both_parts_keep_the_row_order():
+    train, test = split(numbered_table(4, 20))
+    assert (np.diff(train[:, 1]) > 0).all() and (np.diff(test[:, 1]) > 0).all()
+
+
+def test_same_seed_gives_the_same_split():
+    rows = numbered_table(4, 20)
+    assert np.array_equal(split(rows)[1], split(rows)[1])
+
+
+def test_another_seed_gives_another_split():
+    rows = numbered_table(4, 20)
+    assert not np.array_equal(split(rows, seed=12345)[1], split(rows, seed=54321)[1])
+
+
+def test_split_of_a_simulated_dataset(cfg):
+    train, test = split(simulate_dataset(cfg), cfg.data.test_fraction)
+    assert train.shape == (4 * 16, 202) and test.shape == (4 * 4, 202)

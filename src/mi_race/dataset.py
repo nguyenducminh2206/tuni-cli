@@ -75,4 +75,16 @@ def check_dataset(rows: np.ndarray, cfg: Config) -> None:
             raise DatasetError(
                 f"{path} has {runs} runs of symbol {u}, but 'data.runs_per_symbol' is {cfg.data.runs_per_symbol}: {again}"
             )
-        
+
+
+def split_dataset(rows: np.ndarray, test_fraction: float, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """stratified split: each symbol keeps round(runs x test_fraction) of its runs, picked at random, for testing"""
+    symbols = rows[:, 0]
+    test = []
+    for u in range(symbols.max() + 1):
+        runs = np.flatnonzero(symbols == u)             # row numbers of the runs of symbol u
+        n_test = round(len(runs) * test_fraction)
+        test.extend(rng.permutation(runs)[:n_test])     # shuffles the row numbers and takes the first n_test: random pick without repeates
+    is_test = np.zeros(len(rows), dtype=bool)
+    is_test[test] = True
+    return rows[~is_test], rows[is_test]                # both keep the original row order
