@@ -44,10 +44,10 @@ def read_dataset(path:str | Path) -> np.ndarray:
     header = lines[0] if lines else ""      # an empty file has no lines at all
     names = header.split(",")
     if names != ["symbol"] + [f"rx_{m}" for m in range(len(names) - 1)]:
-        raise DatasetError(f"{path} must start with the line 'symbol, rx_0, ..., rx_M'")
+        raise DatasetError(f"{path} must start with the line 'symbol,rx_0,...,rx_M'")
     if len(lines) == 1:
         raise DatasetError(f"{path} has no runs, only the header line")
-    rule = f"every line after the first must be {len(names)} whole numbers ≧ 0, separated by commas"
+    rule = f"every line after the first must be {len(names)} whole numbers >= 0, separated by commas"
     try:
         rows = np.loadtxt(lines[1:], delimiter=",", dtype=int, ndmin=2)
     except ValueError:
