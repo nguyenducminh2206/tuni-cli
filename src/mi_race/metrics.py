@@ -9,3 +9,15 @@ def confusion_matrix(sent: np.ndarray, predicted: np.ndarray, n_symbols: int) ->
     confusion = np.zeros((n_symbols, n_symbols), dtype=int)
     np.add.at(confusion, (sent, predicted), 1)              # adds 1 for every run, also for repeated pairs
     return confusion
+
+def accuracy(confusion: np.ndarray) -> float:
+    """the share of runs where the predicted symbol is the one that was sent"""
+    return float(np.trace(confusion) / confusion.sum())
+
+def macro_f1(confusion: np.ndarray) -> float:
+    """the mean of the symbols' F1 scores, so every symbol counts the same;
+    F1 of symbol u = 2 · (runs right) / (runs sent as u + runs predicted as u)"""
+    right = np.diag(confusion)
+    sent = confusion.sum(axis=1)        # row sums: runs where u was sent
+    predicted = confusion.sum(axis=0)   # column sums: runs where u was predicted
+    return float(np.mean(2 * right / (sent + predicted)))
