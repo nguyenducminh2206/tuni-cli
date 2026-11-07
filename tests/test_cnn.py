@@ -1,6 +1,5 @@
 """tests for src/mi_race/decoders/cnn.py"""
 
-"""tests for src/mi_race/decoders/cnn.py"""
 
 import dataclasses
 from pathlib import Path
