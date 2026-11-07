@@ -226,7 +226,7 @@ def _parse_data(raw: object) -> DataConfig:
     test_runs = runs * fraction
     if test_runs < 1 - _TOL or runs - test_runs < 1 - _TOL:
         raise ConfigError(
-            f"'data.runs_per_symbol' = {runs} is too small for 'data_test_fraction' = {fraction:g} "
+            f"'data.runs_per_symbol' = {runs} is too small for 'data.test_fraction' = {fraction:g} "
             "every symbol needs at least one training run and one test run"
         )
     if runs < RECOMMENDED_RUNS:
