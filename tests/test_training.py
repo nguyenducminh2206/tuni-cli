@@ -5,10 +5,11 @@ import numpy as np
 import pytest
 import torch
 from torch import nn
+from sklearn.preprocessing import StandardScaler
 
 from mi_race.config import MLPConfig
 from mi_race.decoders.mlp import make_mlp
-from mi_race.decoders.training import train_network
+from mi_race.decoders.training import train_network, NetworkDecoder
 from mi_race.streams import random_stream
 
 SETTINGS = MLPConfig(hidden_layers=(16,), epochs=20, lr=0.02, batch_size=16)    # small and fast
@@ -78,3 +79,23 @@ def test_another_stream_shuffles_differently():
 def test_deterministic_mode_is_on():
     trained()
     assert torch.are_deterministic_algorithms_enabled()
+
+
+
+# 5d: the decoder around a trained network
+def test_decoder_gives_probabilities():
+    network, _ = trained()
+    X, _ = easy_data()
+    decoder = NetworkDecoder(StandardScaler().fit(X), network, losses=[])
+    probabilities = decoder.predict_proba(X)
+    assert probabilities.shape == (40, 4)
+    assert probabilities.dtype == np.float64
+    assert (probabilities >= 0).all()
+    assert probabilities.sum(axis=1) == pytest.approx(1)
+
+
+def test_decoder_scales_the_raw_counts():
+    """with a network that changes nothing, the probabilities are the softmax of the scaled counts"""
+    X = np.array([[0, 0], [2, 20]])                         # scaled: [-1, -1] and [1, 1]
+    decoder = NetworkDecoder(StandardScaler().fit(X), nn.Identity(), losses=[])
+    assert decoder.predict_proba(X) == pytest.approx(0.5)   # every probability is 0.5

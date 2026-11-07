@@ -29,3 +29,18 @@ def train_network(network: nn.Module, X: np.ndarray, y: np.ndarray, settings: ML
             total += loss.item() * len(batch)
         losses.append(total / len(X))
     return losses
+
+
+class NetworkDecoder:
+    """a trained network with its scaler: takes raw counts, gives a probability for every symbol"""
+    def __init__(self, scaler, network: nn.Module, losses: list[float]):
+        self.scaler = scaler        # fitted on the training rows; anything with transform(X)
+        self.network = network      # trained
+        self.losses = losses        # the mean training loss of each epoch
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """one row per run, one column per symbol 0 ... N-1; every row adds up to 1"""
+        inputs = torch.as_tensor(self.scaler.transform(X), dtype=torch.float32)
+        with torch.no_grad():       # no training here
+            scores = self.network(inputs)
+        return torch.softmax(scores.double(), dim=1).numpy()   
