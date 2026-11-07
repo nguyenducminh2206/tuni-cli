@@ -2,6 +2,10 @@
 
 from torch import nn
 import numpy as np
+import torch
+
+from mi_race.config import CNNConfig
+from mi_race.decoders.training import NetworkDecoder, train_network
 
 
 def make_cnn(n_inputs: int, channels: tuple[int, ...], kernel_size: int, 
@@ -27,3 +31,13 @@ class GlobalScaler:
     def transform(self, X: np.ndarray) -> np.ndarray:
         """the same shift and stretch for every value, whatever its time step"""
         return (X - self.mean_) / self.scale_
+
+
+def train_cnn(X: np.ndarray, y:np.ndarray, settings: CNNConfig,
+              rng: np.random.Generator) -> NetworkDecoder:
+    """the CNN decoder: all rx values scaled together, then conv layers along the signal"""
+    scaler = GlobalScaler().fit(X)                  # 1 mean and spread of all values, from these runs only
+    torch.manual_seed(int(rng.integers(2**32)))     # the starting weights come from our stream
+    network = make_cnn(X.shape[1], settings.channels, settings.kernel_size, n_symbols=int(y.max()) + 1) 
+    losses = train_network(network, scaler.transform(X), y, settings, rng)
+    return NetworkDecoder(scaler, network, losses)       
