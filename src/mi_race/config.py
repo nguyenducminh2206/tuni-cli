@@ -26,7 +26,7 @@ class ConfigError(ValueError):
 class ChannelConfig:
     """the channel section: a tube of compartments with an absorbing receiver"""
     L: int      # positions: comp 0 ... L-2, receiver at L-1
-    h: float    # comp width -> wider comp mean a molecule needs longer to cross one -> fewer jumps | unit: µm
+    h: float    # comp width -> wider comp means a molecule needs longer to cross one -> fewer jumps | unit: µm
     D: float    # diffusion coefficient -> bigger D means faster spreading -> more jumps | unit: µm²/s
     dt: float   # snapshot interval
     T: float    # duration
@@ -307,7 +307,7 @@ def parse_config(raw: object) -> Config:
 
 @dataclass(frozen=True)
 class RandomForestConfig:
-    """decoder.random_forest: the baseline, a forest of decision trees on the raw counts"""
+    """decoders.random_forest: the baseline, a forest of decision trees on the raw counts"""
     n_estimators: int = 200             # number of trees
 
 

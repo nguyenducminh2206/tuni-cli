@@ -29,7 +29,7 @@ def jump_rates(counts: list[int], jump_rate: float) -> list[tuple[int, int, floa
 
 
 def next_jump(jumps: list[tuple[int, int, float]], rng: np.random.Generator) -> tuple[float, int, int]:
-    """when the next jump happens and which on it is, as (wait, from, to)
+    """when the next jump happens and which one it is, as (wait, from, to)
     the wait (secs) is random with mean 1/total rate: the more that can happen, the sooner something does.
     Each jump is picked with probability rate / total rate.
     jumps must not be empty (the empty tube is handled in 2d)
