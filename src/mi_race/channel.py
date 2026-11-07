@@ -15,7 +15,7 @@ from mi_race.config import Config
 def jump_rates(counts: list[int], jump_rate: float) -> list[tuple[int, int, float]]:
     """every jump that can happen next, as (from, to, rate)
     counts[i] is the number of molecules in compartment i (i=0...L-2)
-    'to' == len(counts) menas a jump into the receiver (absorption)
+    'to' == len(counts) means a jump into the receiver (absorption)
     """
     jumps = []
     for i, n in enumerate(counts):
@@ -29,8 +29,8 @@ def jump_rates(counts: list[int], jump_rate: float) -> list[tuple[int, int, floa
 
 
 def next_jump(jumps: list[tuple[int, int, float]], rng: np.random.Generator) -> tuple[float, int, int]:
-    """when the next jump happens and which ont it is, as (wait, from, to)
-    the wait (secs) is random with mean 1/total rate: the more that can happen, the sooner somthing does.
+    """when the next jump happens and which on it is, as (wait, from, to)
+    the wait (secs) is random with mean 1/total rate: the more that can happen, the sooner something does.
     Each jump is picked with probability rate / total rate.
     jumps must not be empty (the empty tube is handled in 2d)
     """
@@ -46,7 +46,7 @@ def next_jump(jumps: list[tuple[int, int, float]], rng: np.random.Generator) -> 
 
 def simulate(schedule: list[tuple[float, int]], L: int, jump_rate: float, T: float,
              rng: np.random.Generator) -> tuple[list[float], list[int]]:
-    """run the SSA from t=0 to t=T, as (absorption times, counts as T)
+    """run the SSA from t=0 to t=T, as (absorption times, counts at T)
     schedule is the release schedule of one symbol, from encoder.release_schedule.
     The end T works like one more release, of 0 molecules: the jumps stop there.
     """
@@ -81,7 +81,7 @@ def snapshot_times(dt: float, n_intervals: int) -> list[float]:
 def receiver_signal(absorbed: list[float], snapshots: list[float]) -> list[int]:
     """the receiver signal rx_0 ... rx_M, one count per snapshot
     rx_0 = 0, and rx_m is the number of absorptions in (t_{m-1}, t_m].
-    Every absorption must be in (t_0, t_M)
+    Every absorption must be in (t_0, t_M]
     """
     rx = [0] * len(snapshots)
     for t in absorbed:

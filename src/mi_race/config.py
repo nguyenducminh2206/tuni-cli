@@ -26,8 +26,8 @@ class ConfigError(ValueError):
 class ChannelConfig:
     """the channel section: a tube of compartments with an absorbing receiver"""
     L: int      # positions: comp 0 ... L-2, receiver at L-1
-    h: float    # comp width -> wider comp mean a molecule needs loger to cross one -> fewer jumps | unit: µm
-    D: float    # diffusion coefficient -> bigger D means faster spreading -> more jumps | unit: µ²m/s
+    h: float    # comp width -> wider comp mean a molecule needs longer to cross one -> fewer jumps | unit: µm
+    D: float    # diffusion coefficient -> bigger D means faster spreading -> more jumps | unit: µm²/s
     dt: float   # snapshot interval
     T: float    # duration
 
@@ -239,7 +239,7 @@ def _parse_data(raw: object) -> DataConfig:
 
 
 def _parse_output(raw: object) -> OutputConfig:
-    """check the output section and build and OutputConfig"""
+    """check the output section and build an OutputConfig"""
     _check_keys(raw, "output", required=(), optional=("dir",))
     directory = raw.get("dir", OutputConfig.dir)
     if not isinstance(directory, str) or not directory.strip():
@@ -274,7 +274,7 @@ def _parse_decoders(raw: object, channel: ChannelConfig) -> dict:
 
 
 def load_config(path: str | Path) -> Config:
-    """read a config gile and check everything: the one way to get a Config"""
+    """read a config file and check everything: the one way to get a Config"""
     raw = read_config_file(path)
     try:
         return parse_config(raw)
