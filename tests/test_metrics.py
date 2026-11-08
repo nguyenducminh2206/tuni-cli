@@ -2,9 +2,9 @@
 
 import numpy as np
 import pytest
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, mutual_info_score
 
-from mi_race.metrics import confusion_matrix, accuracy, macro_f1
+from mi_race.metrics import confusion_matrix, accuracy, macro_f1, hard_decision_mi, mi_bias
 
 
 # 6a: confusion matrix
@@ -82,3 +82,57 @@ def test_macro_f1_agrees_with_scikit_learn():
 def test_both_give_plain_python_numbers():
     assert type(accuracy(SMALL)) is float
     assert type(macro_f1(SMALL)) is float
+
+
+# 6c: hard-decision MI and its bias
+def test_a_perfect_decoder_gives_log2_n_bits():
+    assert hard_decision_mi(15 * np.eye(4, dtype=int)) == pytest.approx(2)
+
+
+def test_mi_does_not_care_what_the_decoder_calls_the_symbols():
+    """always predicting the next symbol is never right, but tells you everything"""
+    shifted = np.roll(15 * np.eye(4, dtype=int), 1, axis=1)
+    assert accuracy(shifted) == 0
+    assert hard_decision_mi(shifted) == pytest.approx(2)
+
+
+def test_a_decoder_that_always_says_the_same_gives_0_bits():
+    """three of the four columns are empty, so this also checks 0 · log 0 = 0"""
+    confusion = np.zeros((4, 4), dtype=int)
+    confusion[:, 2] = 15
+    assert hard_decision_mi(confusion) == pytest.approx(0, abs=1e-12)
+
+
+def test_a_binary_channel_with_one_error_in_four():
+    """the textbook answer: 1 - H(1/4) bits"""
+    binary_entropy = -(1 / 4 * np.log2(1 / 4) + 3 / 4 * np.log2(3 / 4))
+    assert hard_decision_mi(np.array([[3, 1], [1, 3]])) == pytest.approx(1 - binary_entropy)
+
+
+def test_hard_decision_mi_agrees_with_scikit_learn():
+    """scikit-learn gives nats, so divide by ln 2 for bits"""
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        sent = np.repeat(np.arange(4), 15)
+        predicted = np.where(rng.random(60) < 0.5, sent, rng.integers(4, size=60))
+        expected = mutual_info_score(sent, predicted) / np.log(2)
+        assert hard_decision_mi(confusion_matrix(sent, predicted, 4)) == pytest.approx(expected)
+
+
+def test_mi_bias_by_hand():
+    assert mi_bias(2, 1) == pytest.approx(1 / (2 * np.log(2)))
+    assert mi_bias(4, 240) == pytest.approx(9 / (480 * np.log(2)))
+    assert mi_bias(4, 480) == pytest.approx(mi_bias(4, 240) / 2)
+
+
+def test_a_random_guesser_reads_about_mi_bias_bits():
+    """the guesses carry 0 bits, but on 240 test runs the plug-in estimate gives about mi_bias on average"""
+    rng = np.random.default_rng(0)
+    sent = np.repeat(np.arange(4), 60)
+    estimates = [hard_decision_mi(confusion_matrix(sent, rng.integers(4, size=240), 4)) for _ in range(500)]
+    assert np.mean(estimates) == pytest.approx(mi_bias(4, 240), rel=0.1)
+
+
+def test_mi_and_bias_give_plain_python_numbers():
+    assert type(hard_decision_mi(SMALL)) is float
+    assert type(mi_bias(4, 240)) is float
