@@ -35,3 +35,17 @@ def hard_decision_mi(confusion: np.ndarray) -> float:
 def mi_bias(n_symbols: int, n_test: int) -> float:
     """roughly how many bits hard_decision_mi reads too high on n_test runs: (N-1)² / (2 · n_test · ln 2)"""
     return float((n_symbols - 1) ** 2 / (2 * n_test * np.log(2)))
+
+
+def log_loss(sent: np.ndarray, probabilites: np.ndarray) -> float:
+    """the mean of -ln p(sent symbol) over the runs, in nats; lower is better
+    a probability of 0 is raised to the float64 machine epsilon (2.2e-16) first,
+    so a sure but wrong gess costs about 36 nnats instead of infinity"""
+    picked = probabilites[np.arange(len(sent)), sent]       # each run's probability for the symbol really sent
+    return float(-np.mean(np.log(np.maximum(picked, np.finfo(float).eps))))
+
+def ba_bound(sent: np.ndarray, probabilities: np.ndarray) -> float:
+    """the Barber-Agakov lower bound on I(U;Y) in bits: log₂N + mean(log₂ p(sent symbol)), which is 
+    log₂ N - log_loss in bits; log₂N = H(U) because every symbol has the same number of test runs"""
+    n_symbols = probabilities.shape[1]
+    return float(np.log2(n_symbols) - log_loss(sent, probabilities) / np.log(2))

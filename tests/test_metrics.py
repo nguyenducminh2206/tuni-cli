@@ -3,8 +3,9 @@
 import numpy as np
 import pytest
 from sklearn.metrics import f1_score, mutual_info_score
+from sklearn.metrics import log_loss as sklearn_log_loss
 
-from mi_race.metrics import confusion_matrix, accuracy, macro_f1, hard_decision_mi, mi_bias
+from mi_race.metrics import confusion_matrix, accuracy, macro_f1, hard_decision_mi, mi_bias, log_loss, ba_bound
 
 
 # 6a: confusion matrix
@@ -136,3 +137,47 @@ def test_a_random_guesser_reads_about_mi_bias_bits():
 def test_mi_and_bias_give_plain_python_numbers():
     assert type(hard_decision_mi(SMALL)) is float
     assert type(mi_bias(4, 240)) is float
+
+
+# 6d: log-loss and the Barber–Agakov bound
+def test_log_loss_by_hand():
+    """only the probability of the sent symbol counts, not the largest one"""
+    probabilities = np.array([[0.5, 0.5],
+                              [0.9, 0.1]])
+    assert log_loss(np.array([0, 1]), probabilities) == pytest.approx((np.log(2) + np.log(10)) / 2)
+
+
+def test_log_loss_agrees_with_scikit_learn():
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+        sent = np.repeat(np.arange(4), 15)
+        probabilities = rng.dirichlet(np.ones(4), size=60)          # random rows that add up to 1
+        expected = sklearn_log_loss(sent, probabilities, labels=range(4))
+        assert log_loss(sent, probabilities) == pytest.approx(expected)
+
+
+def test_a_sure_but_wrong_guess_costs_a_lot_but_not_infinity():
+    """the forest can give 0 to the sent symbol; np.log(0) would give -inf and a warning"""
+    loss = log_loss(np.array([1]), np.array([[1.0, 0.0]]))
+    assert np.isfinite(loss)
+    assert loss == pytest.approx(-np.log(np.finfo(float).eps))     # about 36 nats
+
+
+def test_a_sure_and_right_decoder_reaches_log2_n_bits():
+    assert ba_bound(np.arange(4), np.eye(4)) == pytest.approx(2)
+
+
+def test_a_decoder_that_always_says_one_in_n_gets_0_bits():
+    assert ba_bound(np.arange(4), np.full((4, 4), 1 / 4)) == pytest.approx(0, abs=1e-12)
+
+
+def test_an_overconfident_decoder_can_get_a_negative_bound():
+    """right half the time but always 99% sure: the bound is still true, it just says nothing"""
+    probabilities = np.array([[0.99, 0.01],
+                              [0.99, 0.01]])
+    assert ba_bound(np.array([0, 1]), probabilities) < 0
+
+
+def test_log_loss_and_ba_bound_give_plain_python_numbers():
+    assert type(log_loss(np.arange(4), np.eye(4))) is float
+    assert type(ba_bound(np.arange(4), np.eye(4))) is float
