@@ -1,11 +1,13 @@
 """tests for src/mi_race/metrics.py"""
 
+import json
 import numpy as np
 import pytest
 from sklearn.metrics import f1_score, mutual_info_score
 from sklearn.metrics import log_loss as sklearn_log_loss
 
-from mi_race.metrics import confusion_matrix, accuracy, macro_f1, hard_decision_mi, mi_bias, log_loss, ba_bound
+from mi_race.metrics import confusion_matrix, accuracy, macro_f1, hard_decision_mi, mi_bias, log_loss, ba_bound, evaluate
+
 
 
 # 6a: confusion matrix
@@ -181,3 +183,64 @@ def test_an_overconfident_decoder_can_get_a_negative_bound():
 def test_log_loss_and_ba_bound_give_plain_python_numbers():
     assert type(log_loss(np.arange(4), np.eye(4))) is float
     assert type(ba_bound(np.arange(4), np.eye(4))) is float
+
+
+# 6e: evaluate
+SENT = np.array([0, 0, 1, 1, 2, 2])
+PROBABILITIES = np.array([[0.7, 0.2, 0.1],                  # predicted 0, right
+                          [0.4, 0.5, 0.1],                  # predicted 1, wrong
+                          [0.1, 0.8, 0.1],                  # predicted 1, right
+                          [0.6, 0.3, 0.1],                  # predicted 0, wrong
+                          [0.2, 0.3, 0.5],                  # predicted 2, right
+                          [0.1, 0.6, 0.3]])                 # predicted 1, wrong
+
+
+def test_evaluate_gives_every_metric_in_a_fixed_order():
+    """the keys and their order are what metrics.json will show"""
+    assert list(evaluate(SENT, PROBABILITIES)) == [
+        "n_symbols", "n_test", "accuracy", "macro_f1", "hard_decision_mi_bits", "mi_bias_bits",
+        "log_loss_nats", "ba_bound_bits", "confusion_matrix",
+    ]
+
+
+def test_the_prediction_is_the_most_likely_symbol():
+    assert evaluate(SENT, PROBABILITIES)["confusion_matrix"] == [[1, 1, 0],
+                                                                  [1, 1, 0],
+                                                                  [0, 1, 1]]
+
+
+def test_evaluate_agrees_with_the_single_functions():
+    result = evaluate(SENT, PROBABILITIES)
+    confusion = np.array(result["confusion_matrix"])
+    assert result["n_symbols"] == 3
+    assert result["n_test"] == 6
+    assert result["accuracy"] == accuracy(confusion) == pytest.approx(1 / 2)
+    assert result["macro_f1"] == macro_f1(confusion)
+    assert result["hard_decision_mi_bits"] == hard_decision_mi(confusion)
+    assert result["mi_bias_bits"] == mi_bias(3, 6)
+    assert result["log_loss_nats"] == log_loss(SENT, PROBABILITIES)
+    assert result["ba_bound_bits"] == ba_bound(SENT, PROBABILITIES)
+
+
+def test_a_symbol_that_is_never_predicted_keeps_its_column():
+    probabilities = np.array([[0.6, 0.4, 0.0],
+                              [0.3, 0.7, 0.0],
+                              [0.5, 0.2, 0.3]])             # symbol 2 is never the most likely
+    assert evaluate(np.array([0, 1, 2]), probabilities)["confusion_matrix"] == [[1, 0, 0],
+                                                                                 [0, 1, 0],
+                                                                                 [1, 0, 0]]
+
+
+def test_a_sure_and_right_decoder():
+    result = evaluate(np.repeat(np.arange(4), 5), np.repeat(np.eye(4), 5, axis=0))
+    assert result["accuracy"] == 1
+    assert result["macro_f1"] == 1
+    assert result["hard_decision_mi_bits"] == pytest.approx(2)
+    assert result["log_loss_nats"] == pytest.approx(0)
+    assert result["ba_bound_bits"] == pytest.approx(2)
+
+
+def test_the_result_can_be_saved_as_json_and_read_back_unchanged():
+    """json.dumps fails on numpy whole numbers and arrays, so this checks every value is plain Python"""
+    result = evaluate(SENT, PROBABILITIES)
+    assert json.loads(json.dumps(result)) == result

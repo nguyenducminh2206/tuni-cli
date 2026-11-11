@@ -49,3 +49,22 @@ def ba_bound(sent: np.ndarray, probabilities: np.ndarray) -> float:
     log₂ N - log_loss in bits; log₂N = H(U) because every symbol has the same number of test runs"""
     n_symbols = probabilities.shape[1]
     return float(np.log2(n_symbols) - log_loss(sent, probabilities) / np.log(2))
+
+
+def evaluate(sent: np.ndarray, probabilities: np.ndarray) -> dict:
+    """every metric of one decoder on the test rows, as plain Python values ready for metrics.json;
+    the predicted symbol of a run is the one with the highest probability"""
+    n_symbols = probabilities.shape[1]
+    n_test = len(sent)
+    confusion = confusion_matrix(sent, probabilities.argmax(axis=1), n_symbols)
+    return {
+        "n_symbols": n_symbols,
+        "n_test": n_test,
+        "accuracy" : accuracy(confusion),
+        "macro_f1": macro_f1(confusion),
+        "hard_decision_mi_bits": hard_decision_mi(confusion),
+        "mi_bias_bits": mi_bias(n_symbols, n_test),
+        "log_loss_nats": log_loss(sent, probabilities),
+        "ba_bound_bits": ba_bound(sent, probabilities),
+        "confusion_matrix": confusion.tolist()          # nested lists of plain ints: json cant store np arrays 
+    }
