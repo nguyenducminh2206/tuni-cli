@@ -1,12 +1,15 @@
 """tests for src/mi_race/search.py"""
 
+from dataclasses import replace
+from pathlib import Path
+
 import numpy as np
 import pytest
 
-from mi_race.config import RandomForestConfig
+from mi_race.config import ConfigError, RandomForestConfig, load_config
 from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import log_loss
-from mi_race.search import FLOOR, floor_probabilities, out_of_fold_probabilities
+from mi_race.search import FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook
 
 
 # 8b part 1: the probability floor
@@ -107,3 +110,51 @@ def test_the_same_generators_give_the_same_probabilities():
 
 def test_other_folds_give_other_probabilities():
     assert not (forest_probabilities(0, 1) == forest_probabilities(5, 1)).all()
+
+
+
+# 8b part 3: score_codebook
+EXAMPLE = load_config(Path(__file__).parents[1] / "configs" / "example.json")
+SMALL = replace(EXAMPLE, data=replace(EXAMPLE.data, runs_per_symbol=50),                  # 200 runs and small
+                decoders={"random_forest": RandomForestConfig(n_estimators=20)})        # forests: fast tests
+HAND_PICKED = EXAMPLE.encoder.symbols                                   # bursts at slots 0, 3, 6, 9
+CLOSE = tuple(tuple(50 if k == slot else 0 for k in range(10)) for slot in (0, 1, 2, 3))
+
+
+def test_the_same_seed_gives_the_same_score():
+    assert score_codebook(SMALL, HAND_PICKED, seed=7) == score_codebook(SMALL, HAND_PICKED, seed=7)
+
+
+def test_another_seed_gives_another_score():
+    assert score_codebook(SMALL, HAND_PICKED, seed=7) != score_codebook(SMALL, HAND_PICKED, seed=8)
+
+
+def test_only_the_seed_argument_matters_not_the_seed_in_the_base_config():
+    other_base = replace(SMALL, seed=999)
+    assert score_codebook(other_base, HAND_PICKED, seed=7) == score_codebook(SMALL, HAND_PICKED, seed=7)
+
+
+def test_lists_and_tuples_give_the_same_score():
+    as_lists = [list(v) for v in HAND_PICKED]
+    assert score_codebook(SMALL, as_lists, seed=7) == score_codebook(SMALL, HAND_PICKED, seed=7)
+
+
+def test_every_run_is_scored():
+    assert score_codebook(SMALL, HAND_PICKED, seed=7)["n_test"] == 4 * 50
+
+
+def test_the_score_tells_a_good_codebook_from_a_bad_one():
+    """bursts 0.3 s apart are much easier to tell apart than bursts 0.1 s apart"""
+    good = score_codebook(SMALL, HAND_PICKED, seed=7)["ba_bound_bits"]
+    bad = score_codebook(SMALL, CLOSE, seed=7)["ba_bound_bits"]
+    assert good > bad + 0.3
+
+
+@pytest.mark.parametrize("symbols, message", [
+    ([[50] + [0] * 9, [49] + [0] * 9], "budget"),                     # spends 49 molecules, not 50
+    ([[50] + [0] * 9, [50] + [0] * 9], "same as"),                    # two symbols alike: no decoder could tell them apart
+    ([[50] + [0] * 8, [0, 50] + [0] * 7], "entries"),                 # 9 slots, not 10
+])
+def test_a_codebook_that_breaks_the_config_rules_is_rejected(symbols, message):
+    with pytest.raises(ConfigError, match=message):
+        score_codebook(SMALL, symbols, seed=7)

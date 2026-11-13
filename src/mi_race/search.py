@@ -1,9 +1,16 @@
 """encoder search: improve the codebook by moving molecules between slots, scored with the decoders of v1"""
 
+from collections.abc import Callable
+from dataclasses import replace
+
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
-from collections.abc import Callable
+from mi_race.config import Config, RandomForestConfig, _parse_symbols
+from mi_race.dataset import simulate_dataset
+from mi_race.decoders.forest import train_random_forest
+from mi_race.metrics import evaluate
+from mi_race.streams import random_stream
 
 
 FLOOR = 0.0025      # smallest prob a decoder may give in the search
@@ -30,3 +37,18 @@ def out_of_fold_probabilities(X: np.ndarray, y: np.ndarray, train_decoder: Calla
         model = train_decoder(X[train_rows], y[train_rows], settings, decoder_rng)
         probabilities[held_out_rows] = model.predict_proba(X[held_out_rows])
     return probabilities
+
+
+def score_codebook(base_config: Config, symbols, seed: int) -> dict:
+    """every metrics of 1 codebook: simulate, score every run
+    out-of-fold witht the random forest, floor the probabilities, evaluate
+    seed is the dataset seed (dataset_seed): 2 codebooks scored with the same seed share their random numbers"""
+    encoder = base_config.encoder
+    checked = _parse_symbols([list(v) for v in symbols], encoder.n_slots, encoder.budget)   # config's own rules
+    cfg = replace(base_config, seed=seed, encoder=replace(encoder, symbols=checked))
+    rows = simulate_dataset(cfg)        # in memory: no CSV for a codebook that may be thrown away
+    X, y = rows[:, 1:], rows[:, 0]
+    settings = cfg.decoders.get("random_forest", RandomForestConfig())                      # the default if the config has no forest
+    probabilities = out_of_fold_probabilities(X, y, train_random_forest, settings, random_stream(seed, "split"),
+                                              random_stream(seed, "random_forest"))
+    return evaluate(y, floor_probabilities(probabilities))
