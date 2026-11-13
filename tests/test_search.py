@@ -3,8 +3,10 @@
 import numpy as np
 import pytest
 
+from mi_race.config import RandomForestConfig
+from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import log_loss
-from mi_race.search import FLOOR, floor_probabilities
+from mi_race.search import FLOOR, floor_probabilities, out_of_fold_probabilities
 
 
 # 8b part 1: the probability floor
@@ -47,3 +49,61 @@ def test_the_decoder_output_is_not_changed():
     p = np.array([[1.0, 0.0]])
     floor_probabilities(p)
     assert (p == np.array([[1.0, 0.0]])).all()
+
+
+# 8b part 2: out-of-fold probabilities
+class Memorizer:
+    """a fake decoder: it knows the symbol of every run it trained on, and nothing about any other run"""
+
+    def __init__(self, X, y):
+        self.known = {tuple(x): u for x, u in zip(X, y)}
+        self.n_symbols = int(y.max()) + 1
+
+    def predict_proba(self, X):
+        p = np.full((len(X), self.n_symbols), 1 / self.n_symbols)       # an unknown run: every symbol equally likely
+        for i, x in enumerate(X):
+            if tuple(x) in self.known:
+                p[i] = np.eye(self.n_symbols)[self.known[tuple(x)]]   # a known run: sure of its symbol
+        return p
+
+
+def memorize(X, y, settings, rng):
+    """the Memorizer's train function, with the same arguments as the real ones"""
+    return Memorizer(X, y)
+
+
+X_UNIQUE = np.arange(200).reshape(-1, 1)                           # 200 runs, no two alike
+Y_UNIQUE = np.repeat(np.arange(4), 50)                              # 50 runs of each symbol
+
+
+def test_no_run_is_scored_by_a_decoder_that_trained_on_it():
+    """if any run had been in its decoder's training rows, the Memorizer would be sure about it"""
+    p = out_of_fold_probabilities(X_UNIQUE, Y_UNIQUE, memorize, None, np.random.default_rng(0), np.random.default_rng(1))
+    assert p.shape == (200, 4)
+    assert (p == 1 / 4).all()
+
+
+def test_every_fold_holds_out_the_same_number_of_runs_of_each_symbol():
+    trained_on = []
+    def record(X, y, settings, rng):
+        trained_on.append(np.bincount(y).tolist())
+        return Memorizer(X, y)
+    out_of_fold_probabilities(X_UNIQUE, Y_UNIQUE, record, None, np.random.default_rng(0), np.random.default_rng(1))
+    assert trained_on == [[40, 40, 40, 40]] * 5                    # 5 decoders, each trained on 4/5 of every symbol
+
+
+def forest_probabilities(fold_seed, forest_seed):
+    rng = np.random.default_rng(2)
+    X, y = rng.poisson(2.0, size=(100, 10)), np.repeat(np.arange(4), 25)
+    return out_of_fold_probabilities(X, y, train_random_forest, RandomForestConfig(n_estimators=20),
+                                     np.random.default_rng(fold_seed), np.random.default_rng(forest_seed))
+
+
+def test_the_same_generators_give_the_same_probabilities():
+    first = forest_probabilities(0, 1)
+    assert (first == forest_probabilities(0, 1)).all()
+    assert first.sum(axis=1) == pytest.approx(np.ones(100))
+
+
+def test_other_folds_give_other_probabilities():
+    assert not (forest_probabilities(0, 1) == forest_probabilities(5, 1)).all()
