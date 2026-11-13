@@ -10,13 +10,13 @@ from mi_race.config import Config, RandomForestConfig, _parse_symbols
 from mi_race.dataset import simulate_dataset
 from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import evaluate
-from mi_race.streams import random_stream
+from mi_race.streams import random_stream, dataset_seed
 
 
 FLOOR = 0.0025      # smallest prob a decoder may give in the search
 FOLDS = 5           # every run is scored by a decoder trained on the other 4 folds
 CHUNK = 10          # moles per move
-
+THRESHOLD = 0.02    # bits a candidate must gain to be kept: about 2 * the spread of a paired diff (0.010)
 
 def floor_probabilities(probabilities: np.ndarray, floor: float = FLOOR) -> np.ndarray:
     """raise every prob below 'floor' up to 'floor', then rescal each row so it adds up to 1 again
@@ -90,3 +90,27 @@ def propose_move(symbols, rng: np.random.Generator, chunk: int=CHUNK):
     return moves[rng.integers(len(moves))]
 
 
+def search(base_config: Config, start, steps: int, run: int=0, score: Callable = score_codebook,
+           chunk: int=CHUNK, threshold: float=THRESHOLD):
+    """hill climbing over codebooks: each step propose a legal move, scores the parent and the candidate on
+    the same new dataset, and keeps the candidate only if its BA bound is higher by more then 'threshold'
+    'run' picks the random streams (moves and datasets), do 2 runs are 2 independent searches.
+    return the final codebook and the history, one dict per step"""
+    rng = random_stream(base_config.seed, "search_moves", run)
+    current = tuple(tuple(v) for v in start)
+    history = []
+    for step in range(steps):
+        proposal = propose_move(current, rng, chunk)
+        if proposal is None:                            # no legal move left
+            break
+        move, candidate = proposal
+        seed = dataset_seed(base_config.seed, "search_data", run, step)         # a new dataset, the same for both
+        parent_bits = score(base_config, current, seed)["ba_bound_bits"]
+        candidate_bits = score(base_config, candidate, seed)["ba_bound_bits"]
+        accepted = candidate_bits - parent_bits > threshold
+        if accepted:
+            current = candidate
+        history.append({"step": step, "seed": seed, "move": move, "parent_bits": parent_bits,
+                        "candidate_bits": candidate_bits, "difference": candidate_bits - parent_bits,
+                        "accepted": accepted, "codebook": current})
+    return current, history

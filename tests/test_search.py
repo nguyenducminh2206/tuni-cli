@@ -10,7 +10,8 @@ from mi_race.config import ConfigError, RandomForestConfig, _parse_symbols, load
 from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import log_loss
 from mi_race.search import (FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook,
-                            legal_moves, propose_move)
+                            legal_moves, propose_move, search)
+from mi_race.streams import dataset_seed
 
 
 # 8b part 1: the probability floor
@@ -214,3 +215,67 @@ def test_the_codebook_passed_in_is_not_changed():
 def test_a_chunk_below_1_is_a_bug():
     with pytest.raises(ValueError, match="at least 1"):
         legal_moves(HAND_PICKED, chunk=0)
+
+
+
+# 8d: the search loop
+def late_molecules(base_config, symbols, seed):
+    """a fake scorer with a known best direction: 0.125 bit for every 10 molecules released in the last slot
+    (0.125 = 1/8 is exact in floating point, so a gain is exactly 0.125, never 0.12499999)"""
+    return {"ba_bound_bits": sum(v[-1] for v in symbols) / 80}
+
+
+def test_a_candidate_is_kept_only_if_it_gains_more_than_the_threshold():
+    final, history = search(SMALL, CLOSE, steps=30, score=late_molecules)
+    assert len(history) == 30
+    for row in history:
+        assert row["accepted"] == (row["difference"] > 0.02)
+    assert any(row["accepted"] for row in history)                  # some moves into the last slot came up
+
+
+def test_the_codebook_changes_only_when_a_move_is_accepted():
+    codebook = CLOSE
+    _, history = search(SMALL, CLOSE, steps=30, score=late_molecules)
+    for row in history:
+        if row["accepted"]:
+            u, source, target = row["move"]
+            assert target == 9                                      # only moves into the last slot gain
+            assert row["codebook"] != codebook
+        else:
+            assert row["codebook"] == codebook
+        codebook = row["codebook"]
+
+
+def test_a_gain_equal_to_the_threshold_is_not_enough():
+    _, history = search(SMALL, CLOSE, steps=30, score=late_molecules, threshold=0.125)
+    assert any(row["difference"] == 0.125 for row in history)       # such moves came up ...
+    assert not any(row["accepted"] for row in history)              # ... and none was kept
+
+
+def test_parent_and_candidate_share_a_new_dataset_every_step():
+    calls = []
+    def record(base_config, symbols, seed):
+        calls.append(seed)
+        return late_molecules(base_config, symbols, seed)
+    _, history = search(SMALL, CLOSE, steps=5, run=2, score=record)
+    assert calls[0::2] == calls[1::2]                               # parent and candidate: the same seed
+    assert calls[0::2] == [dataset_seed(SMALL.seed, "search_data", 2, step) for step in range(5)]
+    assert [row["seed"] for row in history] == calls[0::2]
+
+
+def test_the_same_run_repeats_and_another_run_searches_differently():
+    first = search(SMALL, CLOSE, steps=10, run=0, score=late_molecules)
+    assert search(SMALL, CLOSE, steps=10, run=0, score=late_molecules) == first
+    assert search(SMALL, CLOSE, steps=10, run=1, score=late_molecules) != first
+
+
+def test_the_search_stops_when_no_move_is_legal():
+    final, history = search(SMALL, CLOSE, steps=10, score=late_molecules, chunk=60)   # no slot holds 60
+    assert history == []
+    assert final == CLOSE
+
+
+def test_the_search_runs_with_the_real_scorer():
+    final, history = search(SMALL, HAND_PICKED, steps=2)
+    assert len(history) == 2
+    assert all(isinstance(row["difference"], float) for row in history)
