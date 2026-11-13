@@ -15,6 +15,7 @@ from mi_race.streams import random_stream
 
 FLOOR = 0.0025      # smallest prob a decoder may give in the search
 FOLDS = 5           # every run is scored by a decoder trained on the other 4 folds
+CHUNK = 10          # moles per move
 
 
 def floor_probabilities(probabilities: np.ndarray, floor: float = FLOOR) -> np.ndarray:
@@ -52,3 +53,40 @@ def score_codebook(base_config: Config, symbols, seed: int) -> dict:
     probabilities = out_of_fold_probabilities(X, y, train_random_forest, settings, random_stream(seed, "split"),
                                               random_stream(seed, "random_forest"))
     return evaluate(y, floor_probabilities(probabilities))
+
+
+def legal_moves(symbols, chunk: int = CHUNK) -> list[tuple[tuple[int, int, int], tuple[tuple[int, ...], ...]]]:
+    """"every move of 'chunk' moles from 1 slot of 1 symbol to anothe slot, that keeps the codebook legal:
+    the source slot has at least 'chunk' moles, and the changed symbol is not the same as another symbol
+    each item is (move, new codebook) with move = (symbol, source slot, target slot); butget never changes
+    """
+    if chunk < 1:
+        raise ValueError(f"chunk must be at least 1 moles, got {chunk}")
+    codebook = [tuple(v) for v in symbols]
+    moves = []
+    for u, vector in enumerate(codebook):
+        for source, amount in enumerate(vector):
+            if amount < chunk:
+                continue
+            for target in range(len(vector)):
+                if target == source:
+                    continue
+                changed = list(vector)
+                changed[source] -= chunk
+                changed[target] += chunk
+                if tuple(changed) in codebook:
+                    continue                    # same as another symbol
+                new = codebook[:u] + [tuple(changed)] + codebook[u + 1:]
+                moves.append(((u, source, target), tuple(new)))
+    return moves
+
+
+def propose_move(symbols, rng: np.random.Generator, chunk: int=CHUNK):
+    """1 legal move picked at random, every legal move equally likely: (move, new codebook).
+    or None if no move is legal"""
+    moves = legal_moves(symbols, chunk)
+    if not moves:
+        return None
+    return moves[rng.integers(len(moves))]
+
+

@@ -6,10 +6,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from mi_race.config import ConfigError, RandomForestConfig, load_config
+from mi_race.config import ConfigError, RandomForestConfig, _parse_symbols, load_config
 from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import log_loss
-from mi_race.search import FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook
+from mi_race.search import (FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook,
+                            legal_moves, propose_move)
 
 
 # 8b part 1: the probability floor
@@ -158,3 +159,58 @@ def test_the_score_tells_a_good_codebook_from_a_bad_one():
 def test_a_codebook_that_breaks_the_config_rules_is_rejected(symbols, message):
     with pytest.raises(ConfigError, match=message):
         score_codebook(SMALL, symbols, seed=7)
+
+
+# 8c: moves
+def test_legal_moves_by_hand():
+    """moving 10 from slot 0 to slot 1 would turn symbol 0 into symbol 1, and moving symbol 1's
+    last 10 back would turn it into symbol 0: only one move is left"""
+    assert legal_moves([[50, 0], [40, 10]], chunk=10) == [((1, 0, 1), ((50, 0), (30, 20)))]
+
+
+def test_every_pulse_can_send_a_chunk_to_any_other_slot():
+    """4 symbols x 1 full slot x 9 other slots"""
+    assert len(legal_moves(HAND_PICKED)) == 36
+
+
+def test_every_move_keeps_the_codebook_legal():
+    for move, codebook in legal_moves(HAND_PICKED) + legal_moves(CLOSE):
+        assert _parse_symbols([list(v) for v in codebook], n_slots=10, budget=50)        # raises if it breaks a rule
+
+
+def test_a_move_changes_exactly_two_slots_of_one_symbol():
+    for (u, source, target), codebook in legal_moves(HAND_PICKED):
+        diff = np.array(codebook) - np.array(HAND_PICKED)
+        assert diff[u, source] == -10 and diff[u, target] == 10
+        assert np.count_nonzero(diff) == 2
+
+
+def test_no_legal_move_gives_none():
+    """no slot holds a whole chunk"""
+    assert legal_moves([[5, 5], [4, 6]], chunk=10) == []
+    assert propose_move([[5, 5], [4, 6]], np.random.default_rng(0), chunk=10) is None
+
+
+def test_every_legal_move_is_equally_likely():
+    rng = np.random.default_rng(0)
+    counts = {}
+    for _ in range(3600):
+        move, _ = propose_move(HAND_PICKED, rng)
+        counts[move] = counts.get(move, 0) + 1
+    assert len(counts) == 36                                        # every move turned up
+    assert all(60 < n < 140 for n in counts.values())               # about 100 each (3600 / 36)
+
+
+def test_the_same_generator_gives_the_same_move():
+    assert propose_move(HAND_PICKED, np.random.default_rng(3)) == propose_move(HAND_PICKED, np.random.default_rng(3))
+
+
+def test_the_codebook_passed_in_is_not_changed():
+    symbols = [[50, 0], [0, 50]]
+    propose_move(symbols, np.random.default_rng(0), chunk=10)
+    assert symbols == [[50, 0], [0, 50]]
+
+
+def test_a_chunk_below_1_is_a_bug():
+    with pytest.raises(ValueError, match="at least 1"):
+        legal_moves(HAND_PICKED, chunk=0)
