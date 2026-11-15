@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mi-race"
 version = "1.0.0dev0"
 description = "Molecular communication through a stochastic diffusion channel"
-readme = "SPEC.md"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
