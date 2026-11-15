@@ -123,7 +123,31 @@ def check_codebook(base_config: Config, symbols, n_checks: int=CHECKS, score: Ca
     every codebook is checked on the same datasets, so 2 checks can be compared run by run (paired)
     these are development numbers: use them to choose search settings, never as the final result"""
     if n_checks < 2:
-        raise ValueError(f"n_checks myst be at least 2 to measure a spread, got {n_checks}")
+        raise ValueError(f"n_checks must be at least 2 to measure a spread, got {n_checks}")
     seeds = [dataset_seed(base_config.seed, "check_data", i) for i in range(n_checks)]
     bits = [score(base_config, symbols, seed)["ba_bound_bits"] for seed in seeds]
     return {"bits": bits, "mean": float(np.mean(bits)), "sd": float(np.std(bits, ddof=1))}
+
+
+def learning_curve(base_config: Config, start, history: list, every: int=10, n_checks:int=CHECKS,
+                   score: Callable=score_codebook) -> list:
+    """check the start codebook and the codebook after every 'every' steps of a search history (and after the last step)
+    all on the same check datasets. A codebook that was already checked is not checked again
+    return 1 dict per point: the steps done, the moves accepted so far, and the check (bits, mean, sd)"""
+    if every < 1:
+        raise ValueError(f"every must be at least 1, got {every}")
+    codebooks = [start] + [row["codebook"] for row in history]      # codebooks[k]: the codebook after k steps
+    points = list(range(0, len(history) + 1, every))
+    if points[-1] != len(history):
+        points.append(len(history))                                 # always end with the last step
+    checks = {}                                                     # codebook -> its check
+    curve = []
+    for k in points:
+        codebook = tuple(tuple(v) for v in codebooks[k])            # tuples, so it can be a dict key
+        if codebook not in checks:
+            checks[codebook] = check_codebook(base_config, codebook, n_checks, score)
+        accepted = sum(row["accepted"] for row in history[:k])
+        curve.append({"steps": k, "accepted": accepted, **checks[codebook]})
+    return curve
+
+

@@ -6,13 +6,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import json
-from dataclasses import replace
 
 from mi_race.config import ConfigError, RandomForestConfig, _parse_symbols, load_config
 from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import log_loss
 from mi_race.search import (FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook,
-                            legal_moves, propose_move, search, check_codebook)
+                            legal_moves, propose_move, search, check_codebook, learning_curve)
 from mi_race.streams import dataset_seed
 
 
@@ -321,3 +320,59 @@ def test_a_check_can_be_saved_as_json():
 def test_one_check_dataset_is_not_enough():
     with pytest.raises(ValueError, match="at least 2"):
         check_codebook(SMALL, HAND_PICKED, n_checks=1)
+
+
+
+# 8e part 2: the learning curve
+def nothing_helps(base_config, symbols, seed):
+    """a fake scorer: every codebook scores 0, so the search rejects every move"""
+    return {"ba_bound_bits": 0.0}
+
+
+def test_the_curve_has_a_point_every_few_steps_and_at_the_end():
+    _, history = search(SMALL, CLOSE, steps=25, score=late_molecules)
+    curve = learning_curve(SMALL, CLOSE, history, every=10, score=late_molecules)
+    assert [point["steps"] for point in curve] == [0, 10, 20, 25]
+
+
+def test_each_point_checks_the_codebook_after_that_many_steps():
+    _, history = search(SMALL, CLOSE, steps=25, score=late_molecules)
+    curve = learning_curve(SMALL, CLOSE, history, every=1, score=late_molecules)         # a point after every step
+    # every accepted move put 10 more molecules in a last slot (0.125 bit) and CLOSE starts with none there
+    assert [point["mean"] for point in curve] == [0.125 * point["accepted"] for point in curve]
+    assert curve[0]["accepted"] == 0 and curve[-1]["accepted"] > 0          # the start, then a real climb
+
+
+def test_a_codebook_is_checked_only_once():
+    _, history = search(SMALL, CLOSE, steps=25, score=nothing_helps)        # the codebook never changes
+    seen = []
+    def record(base_config, symbols, seed):
+        seen.append(seed)
+        return numbered_by_check(base_config, symbols, seed)
+    curve = learning_curve(SMALL, CLOSE, history, every=1, score=record)
+    assert len(curve) == 26                                                 # steps 0, 1, ..., 25
+    assert seen == CHECK_SEEDS                                              # 5 scores, not 26 * 5
+    assert all(point["bits"] == [0, 1, 2, 3, 4] for point in curve)
+
+
+def test_a_search_without_steps_gives_only_the_start():
+    _, history = search(SMALL, CLOSE, steps=10, score=late_molecules, chunk=60)     # no legal move
+    curve = learning_curve(SMALL, CLOSE, history, score=late_molecules)
+    assert [(point["steps"], point["accepted"]) for point in curve] == [(0, 0)]
+
+
+def test_a_start_given_as_lists_works():
+    as_lists = [list(v) for v in CLOSE]
+    assert learning_curve(SMALL, as_lists, [], score=late_molecules) == learning_curve(SMALL, CLOSE, [], score=late_molecules)
+
+
+def test_every_below_1_is_a_bug():
+    with pytest.raises(ValueError, match="at least 1"):
+        learning_curve(SMALL, CLOSE, [], every=0, score=late_molecules)
+
+
+def test_a_real_curve_can_be_saved_as_json():
+    _, history = search(SMALL, HAND_PICKED, steps=2)
+    curve = learning_curve(SMALL, HAND_PICKED, history, every=1, n_checks=2)
+    assert [point["steps"] for point in curve] == [0, 1, 2]
+    assert json.loads(json.dumps(curve)) == curve                           # plain numbers, no numpy types
