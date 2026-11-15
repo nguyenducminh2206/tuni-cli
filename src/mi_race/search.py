@@ -17,6 +17,8 @@ FLOOR = 0.0025      # smallest prob a decoder may give in the search
 FOLDS = 5           # every run is scored by a decoder trained on the other 4 folds
 CHUNK = 10          # moles per move
 THRESHOLD = 0.02    # bits a candidate must gain to be kept: about 2 * the spread of a paired diff (0.010)
+CHECKS = 5          # check datasets per codebook: their mean has a spread of about 0.01 bits
+
 
 def floor_probabilities(probabilities: np.ndarray, floor: float = FLOOR) -> np.ndarray:
     """raise every prob below 'floor' up to 'floor', then rescal each row so it adds up to 1 again
@@ -114,3 +116,14 @@ def search(base_config: Config, start, steps: int, run: int=0, score: Callable =
                         "candidate_bits": candidate_bits, "difference": candidate_bits - parent_bits,
                         "accepted": accepted, "codebook": current})
     return current, history
+
+
+def check_codebook(base_config: Config, symbols, n_checks: int=CHECKS, score: Callable=score_codebook) -> dict:
+    """the BA bound of a codebook on the check datasets (check_data 0 ... n_checks - 1), with their mean and spread
+    every codebook is checked on the same datasets, so 2 checks can be compared run by run (paired)
+    these are development numbers: use them to choose search settings, never as the final result"""
+    if n_checks < 2:
+        raise ValueError(f"n_checks myst be at least 2 to measure a spread, got {n_checks}")
+    seeds = [dataset_seed(base_config.seed, "check_data", i) for i in range(n_checks)]
+    bits = [score(base_config, symbols, seed)["ba_bound_bits"] for seed in seeds]
+    return {"bits": bits, "mean": float(np.mean(bits)), "sd": float(np.std(bits, ddof=1))}

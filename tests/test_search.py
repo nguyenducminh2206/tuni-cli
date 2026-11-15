@@ -5,12 +5,14 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import json
+from dataclasses import replace
 
 from mi_race.config import ConfigError, RandomForestConfig, _parse_symbols, load_config
 from mi_race.decoders.forest import train_random_forest
 from mi_race.metrics import log_loss
 from mi_race.search import (FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook,
-                            legal_moves, propose_move, search)
+                            legal_moves, propose_move, search, check_codebook)
 from mi_race.streams import dataset_seed
 
 
@@ -279,3 +281,43 @@ def test_the_search_runs_with_the_real_scorer():
     final, history = search(SMALL, HAND_PICKED, steps=2)
     assert len(history) == 2
     assert all(isinstance(row["difference"], float) for row in history)
+
+
+# 8e part 1: development checks
+CHECK_SEEDS = [dataset_seed(SMALL.seed, "check_data", i) for i in range(5)]
+
+
+def numbered_by_check(base_config, symbols, seed):
+    """a fake scorer: check dataset i scores i bits, whatever the codebook"""
+    return {"ba_bound_bits": float(CHECK_SEEDS.index(seed))}
+
+
+def test_check_mean_and_spread_by_hand():
+    check = check_codebook(SMALL, HAND_PICKED, score=numbered_by_check)
+    assert check["bits"] == [0, 1, 2, 3, 4]
+    assert check["mean"] == 2
+    assert check["sd"] == pytest.approx(np.sqrt(2.5))                 # sum of (i - 2)^2 = 10, over 5 - 1
+
+
+def test_every_codebook_is_checked_on_the_same_check_datasets():
+    seen = []
+    def record(base_config, symbols, seed):
+        seen.append(seed)
+        return late_molecules(base_config, symbols, seed)
+    check_codebook(SMALL, HAND_PICKED, score=record)
+    check_codebook(SMALL, CLOSE, score=record)
+    assert seen == CHECK_SEEDS + CHECK_SEEDS                        # never a search or final dataset
+
+
+def test_a_check_repeats_exactly():
+    assert check_codebook(SMALL, HAND_PICKED, n_checks=2) == check_codebook(SMALL, HAND_PICKED, n_checks=2)
+
+
+def test_a_check_can_be_saved_as_json():
+    check = check_codebook(SMALL, HAND_PICKED, score=numbered_by_check)
+    assert json.loads(json.dumps(check)) == check
+
+
+def test_one_check_dataset_is_not_enough():
+    with pytest.raises(ValueError, match="at least 2"):
+        check_codebook(SMALL, HAND_PICKED, n_checks=1)
