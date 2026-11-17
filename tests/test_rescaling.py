@@ -3,7 +3,8 @@
 import numpy as np
 import pytest
 
-from mi_race.decoders.rescaling import rescale
+from mi_race.decoders.rescaling import rescale, TEMPERATURES, fit_temperature
+from mi_race.metrics import log_loss
 
 P = np.array([[0.7, 0.2, 0.1],
               [0.98, 0.01, 0.01]])
@@ -58,3 +59,59 @@ def test_the_probabilities_passed_in_are_not_changed():
 def test_a_temperature_of_0_or_below_is_a_bug(temperature):
     with pytest.raises(ValueError, match="above 0"):
         rescale(P, temperature)
+
+
+
+# 6f part 2: fit_temperature
+def honest_decoder(n_runs=5000, seed=0):
+    """probabilities that are exactly right on average: each run's sent symbol is drawn from its own probabilities"""
+    rng = np.random.default_rng(seed)
+    probabilities = rng.dirichlet(np.ones(4), size=n_runs)
+    sent = np.array([rng.choice(4, p=p) for p in probabilities])
+    return probabilities, sent
+
+
+def test_an_honest_decoder_needs_no_rescaling():
+    probabilities, sent = honest_decoder()
+    assert fit_temperature(probabilities, sent) == pytest.approx(1, rel=0.1)
+
+
+def test_an_overconfident_decoder_is_softened_by_the_right_amount():
+    probabilities, sent = honest_decoder()
+    overconfident = rescale(probabilities, 1 / 3)                      # 3 times too sure
+    assert fit_temperature(overconfident, sent) == pytest.approx(3, rel=0.1)
+
+
+def test_an_underconfident_decoder_is_sharpened():
+    probabilities, sent = honest_decoder()
+    underconfident = rescale(probabilities, 2)                         # half as sure as it should be
+    assert fit_temperature(underconfident, sent) == pytest.approx(0.5, rel=0.1)
+
+
+def test_the_fitted_temperature_is_never_worse_than_none():
+    probabilities, sent = honest_decoder(n_runs=300, seed=1)
+    overconfident = rescale(probabilities, 0.2)
+    T = fit_temperature(overconfident, sent)
+    assert log_loss(sent, rescale(overconfident, T)) <= log_loss(sent, overconfident)     # T = 1 is one of the tries
+
+
+def test_the_temperature_is_one_of_the_tries():
+    assert TEMPERATURES[0] == pytest.approx(0.05) and TEMPERATURES[-1] == pytest.approx(20)
+    assert 1 in np.round(TEMPERATURES, 12)
+    probabilities, sent = honest_decoder(n_runs=300, seed=2)
+    assert fit_temperature(probabilities, sent) in TEMPERATURES
+
+
+def test_a_sure_and_right_decoder_gets_the_sharpest_temperature():
+    sure = np.array([[0.9, 0.1], [0.2, 0.8]])                         # right on both runs: sharper is always better
+    assert fit_temperature(sure, np.array([0, 1])) == TEMPERATURES[0]
+
+
+def test_a_decoder_that_is_always_wrong_gets_the_softest_temperature():
+    wrong = np.array([[0.9, 0.1], [0.2, 0.8]])                        # wrong on both runs: closer to 50/50 is always better
+    assert fit_temperature(wrong, np.array([1, 0])) == TEMPERATURES[-1]
+
+
+def test_the_temperature_is_a_plain_number():
+    probabilities, sent = honest_decoder(n_runs=300, seed=3)
+    assert type(fit_temperature(probabilities, sent)) is float
