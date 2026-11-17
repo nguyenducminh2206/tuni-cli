@@ -2,13 +2,17 @@
 
 from collections.abc import Callable
 from dataclasses import replace
+from functools import partial
 
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
 
-from mi_race.config import Config, RandomForestConfig, _parse_symbols
+from mi_race.config import DECODERS, Config, _parse_symbols
 from mi_race.dataset import simulate_dataset
+from mi_race.decoders.cnn import train_cnn
 from mi_race.decoders.forest import train_random_forest
+from mi_race.decoders.mlp import train_mlp
+from mi_race.decoders.rescaling import train_rescaled
 from mi_race.metrics import evaluate
 from mi_race.streams import random_stream, dataset_seed
 
@@ -18,6 +22,8 @@ FOLDS = 5           # every run is scored by a decoder trained on the other 4 fo
 CHUNK = 10          # moles per move
 THRESHOLD = 0.02    # bits a candidate must gain to be kept: about 2 * the spread of a paired diff (0.010)
 CHECKS = 5          # check datasets per codebook: their mean has a spread of about 0.01 bits
+TRAINERS = {"random_forest": train_random_forest, "mlp": train_mlp, "cnn": train_cnn}   # decoders a codebook can be scored with
+
 
 
 def floor_probabilities(probabilities: np.ndarray, floor: float = FLOOR) -> np.ndarray:
@@ -42,18 +48,20 @@ def out_of_fold_probabilities(X: np.ndarray, y: np.ndarray, train_decoder: Calla
     return probabilities
 
 
-def score_codebook(base_config: Config, symbols, seed: int) -> dict:
-    """every metrics of 1 codebook: simulate, score every run
-    out-of-fold witht the random forest, floor the probabilities, evaluate
+def score_codebook(base_config: Config, symbols, seed: int, decoder: str="random_forest", rescaled: bool=False) -> dict:
+    """every metric of 1 codebook: simulate, score every run out-of-fold with 1 decoder, floor the probabilities, evaluate
+    rescaled: each fold's decoder also gets a temperature, fitted on runs held back from its own training runs
     seed is the dataset seed (dataset_seed): 2 codebooks scored with the same seed share their random numbers"""
+    if decoder not in TRAINERS:
+        raise ValueError(f"unknown decoder {decoder!r}: use one of {','.join(TRAINERS)}")
     encoder = base_config.encoder
-    checked = _parse_symbols([list(v) for v in symbols], encoder.n_slots, encoder.budget)   # config's own rules
+    checked = _parse_symbols([list(v) for v in symbols], encoder.n_slots, encoder.budget)
     cfg = replace(base_config, seed=seed, encoder=replace(encoder, symbols=checked))
-    rows = simulate_dataset(cfg)        # in memory: no CSV for a codebook that may be thrown away
+    rows = simulate_dataset(cfg)                                    # in memory: no csv for a codebook that may be thrown away
     X, y = rows[:, 1:], rows[:, 0]
-    settings = cfg.decoders.get("random_forest", RandomForestConfig())                      # the default if the config has no forest
-    probabilities = out_of_fold_probabilities(X, y, train_random_forest, settings, random_stream(seed, "split"),
-                                              random_stream(seed, "random_forest"))
+    settings = cfg.decoders.get(decoder, DECODERS[decoder]())       # the defaults if the config has now section for it
+    train_decoder = partial(train_rescaled, TRAINERS[decoder]) if rescaled else TRAINERS[decoder]
+    probabilities = out_of_fold_probabilities(X, y, train_decoder, settings, random_stream(seed, "split"), random_stream(seed, decoder))
     return evaluate(y, floor_probabilities(probabilities))
 
 

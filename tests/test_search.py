@@ -1,18 +1,22 @@
 """tests for src/mi_race/search.py"""
 
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 import numpy as np
 import pytest
 import json
 
-from mi_race.config import ConfigError, RandomForestConfig, _parse_symbols, load_config
+from mi_race.config import CNNConfig, ConfigError, MLPConfig, RandomForestConfig, _parse_symbols, load_config
+from mi_race.dataset import simulate_dataset
 from mi_race.decoders.forest import train_random_forest
-from mi_race.metrics import log_loss
-from mi_race.search import (FLOOR, floor_probabilities, out_of_fold_probabilities, score_codebook,
+from mi_race.decoders.mlp import train_mlp
+from mi_race.decoders.rescaling import train_rescaled
+from mi_race.metrics import evaluate, log_loss
+from mi_race.search import (FLOOR, TRAINERS, floor_probabilities, out_of_fold_probabilities, score_codebook,
                             legal_moves, propose_move, search, check_codebook, learning_curve)
-from mi_race.streams import dataset_seed
+from mi_race.streams import dataset_seed, random_stream
 
 
 # 8b part 1: the probability floor
@@ -376,3 +380,53 @@ def test_a_real_curve_can_be_saved_as_json():
     curve = learning_curve(SMALL, HAND_PICKED, history, every=1, n_checks=2)
     assert [point["steps"] for point in curve] == [0, 1, 2]
     assert json.loads(json.dumps(curve)) == curve                           # plain numbers, no numpy types
+
+
+# 8f: scoring with another decoder, plain or rescaled
+NETS = replace(SMALL, decoders={"random_forest": RandomForestConfig(n_estimators=20),       # small settings: fast tests
+                                "mlp": MLPConfig(hidden_layers=(16,), epochs=5, lr=0.02, batch_size=16),
+                                "cnn": CNNConfig(channels=(4,), kernel_size=3, epochs=5, lr=0.02, batch_size=16)})
+
+
+def test_the_plain_forest_is_still_the_default():
+    plain_forest = score_codebook(SMALL, HAND_PICKED, seed=7, decoder="random_forest", rescaled=False)
+    assert score_codebook(SMALL, HAND_PICKED, seed=7) == plain_forest
+
+
+@pytest.mark.parametrize("decoder", ["random_forest", "mlp", "cnn"])
+@pytest.mark.parametrize("rescaled", [False, True])
+def test_every_decoder_can_score_every_run_plain_or_rescaled(decoder, rescaled):
+    result = score_codebook(NETS, HAND_PICKED, seed=7, decoder=decoder, rescaled=rescaled)
+    assert result["n_test"] == 4 * 50 and isinstance(result["ba_bound_bits"], float)
+
+
+def test_a_rescaled_score_is_made_of_the_known_pieces():
+    """simulate, out-of-fold with train_rescaled around the decoder and the decoder's own stream, floor, evaluate"""
+    rows = simulate_dataset(replace(NETS, seed=7))
+    X, y = rows[:, 1:], rows[:, 0]
+    p = out_of_fold_probabilities(X, y, partial(train_rescaled, train_mlp), NETS.decoders["mlp"],
+                                  random_stream(7, "split"), random_stream(7, "mlp"))
+    assert score_codebook(NETS, HAND_PICKED, seed=7, decoder="mlp", rescaled=True) == evaluate(y, floor_probabilities(p))
+
+
+def test_the_settings_come_from_the_config_or_else_the_defaults(monkeypatch):
+    seen = []
+    def record(X, y, settings, rng):
+        seen.append(settings)
+        return train_random_forest(X, y, RandomForestConfig(n_estimators=5), rng)     # any quick decoder will do
+    monkeypatch.setitem(TRAINERS, "mlp", record)
+    score_codebook(NETS, HAND_PICKED, seed=7, decoder="mlp")
+    score_codebook(SMALL, HAND_PICKED, seed=7, decoder="mlp")                         # SMALL has no mlp section
+    assert seen == [NETS.decoders["mlp"]] * 5 + [MLPConfig()] * 5                     # one decoder per fold
+
+
+def test_an_unknown_decoder_is_rejected():
+    with pytest.raises(ValueError, match="unknown decoder"):
+        score_codebook(SMALL, HAND_PICKED, seed=7, decoder="svm")
+
+
+def test_a_search_and_its_learning_curve_can_use_a_rescaled_mlp():
+    score = partial(score_codebook, decoder="mlp", rescaled=True)
+    final, history = search(NETS, HAND_PICKED, steps=2, score=score)
+    curve = learning_curve(NETS, HAND_PICKED, history, every=1, n_checks=2, score=score)
+    assert len(history) == 2 and [point["steps"] for point in curve] == [0, 1, 2]
