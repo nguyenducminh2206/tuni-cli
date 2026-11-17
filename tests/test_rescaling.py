@@ -3,8 +3,15 @@
 import numpy as np
 import pytest
 
-from mi_race.decoders.rescaling import rescale, TEMPERATURES, fit_temperature
+from functools import partial
+
+from mi_race.config import CNNConfig, MLPConfig, RandomForestConfig
+from mi_race.decoders.cnn import train_cnn
+from mi_race.decoders.mlp import train_mlp
+from mi_race.decoders.forest import train_random_forest
+from mi_race.decoders.rescaling import rescale, TEMPERATURES, fit_temperature, RescaledDecoder, train_rescaled
 from mi_race.metrics import log_loss
+from mi_race.search import out_of_fold_probabilities
 
 P = np.array([[0.7, 0.2, 0.1],
               [0.98, 0.01, 0.01]])
@@ -115,3 +122,79 @@ def test_a_decoder_that_is_always_wrong_gets_the_softest_temperature():
 def test_the_temperature_is_a_plain_number():
     probabilities, sent = honest_decoder(n_runs=300, seed=3)
     assert type(fit_temperature(probabilities, sent)) is float
+
+
+# 6f part 3: train_rescaled
+class SureOfZero:
+    """a fake decoder: sure and right on the runs it trained on, 90% sure of symbol 0 on any other run"""
+
+    def __init__(self, X, y):
+        self.known = {tuple(x): u for x, u in zip(X, y)}
+
+    def predict_proba(self, X):
+        p = np.tile([0.9, 0.1 / 3, 0.1 / 3, 0.1 / 3], (len(X), 1))
+        for i, x in enumerate(X):
+            if tuple(x) in self.known:
+                p[i] = np.eye(4)[self.known[tuple(x)]]
+        return p
+
+
+def sure_of_zero(X, y, settings, rng):
+    """SureOfZero's train function, with the same arguments as the real ones"""
+    return SureOfZero(X, y)
+
+
+X_UNIQUE = np.arange(200).reshape(-1, 1)                           # 200 runs, no two alike
+Y_UNIQUE = np.repeat(np.arange(4), 50)                              # 50 runs of each symbol
+
+
+def test_the_temperature_is_fitted_on_runs_the_decoder_did_not_train_on():
+    model = train_rescaled(sure_of_zero, X_UNIQUE, Y_UNIQUE, None, np.random.default_rng(0))
+    assert isinstance(model, RescaledDecoder)
+    assert model.temperature > 1            # on its own training runs it is always right, which would give 0.05
+
+
+def test_20_percent_of_each_symbol_is_held_back():
+    trained_on = []
+    def record(X, y, settings, rng):
+        trained_on.append(np.bincount(y).tolist())
+        return SureOfZero(X, y)
+    train_rescaled(record, X_UNIQUE, Y_UNIQUE, None, np.random.default_rng(0))
+    assert trained_on == [[40, 40, 40, 40]]                         # 10 runs of each symbol held back
+
+
+def test_the_rescaled_decoder_makes_the_same_guesses_with_rescaled_probabilities():
+    model = train_rescaled(sure_of_zero, X_UNIQUE, Y_UNIQUE, None, np.random.default_rng(0))
+    X_new = np.arange(200, 220).reshape(-1, 1)
+    plain = model.decoder.predict_proba(X_new)
+    assert model.predict_proba(X_new) == pytest.approx(rescale(plain, model.temperature))
+    assert (model.predict_proba(X_new).argmax(axis=1) == plain.argmax(axis=1)).all()
+
+
+SMALL = {"random_forest": (train_random_forest, RandomForestConfig(n_estimators=10)),
+         "mlp": (train_mlp, MLPConfig(hidden_layers=(16,), epochs=5, lr=0.02, batch_size=16)),
+         "cnn": (train_cnn, CNNConfig(channels=(4,), kernel_size=3, epochs=5, lr=0.02, batch_size=16))}
+
+
+@pytest.mark.parametrize("name", SMALL)
+def test_every_real_decoder_can_be_rescaled_and_the_same_stream_repeats(name):
+    data = np.random.default_rng(0)
+    X, y, X_new = data.poisson(0.5, size=(40, 30)), np.repeat(np.arange(4), 10), data.poisson(0.5, size=(8, 30))
+    train, settings = SMALL[name]
+    first = train_rescaled(train, X, y, settings, np.random.default_rng(1))
+    second = train_rescaled(train, X, y, settings, np.random.default_rng(1))
+    assert type(first.temperature) is float and first.temperature == second.temperature
+    assert (first.predict_proba(X_new) == second.predict_proba(X_new)).all()
+    assert first.predict_proba(X_new).sum(axis=1) == pytest.approx(np.ones(8))
+
+
+def test_it_fits_where_a_train_function_fits():
+    rescaled = partial(train_rescaled, sure_of_zero)                # the same arguments as train_random_forest & co
+    p = out_of_fold_probabilities(X_UNIQUE, Y_UNIQUE, rescaled, None, np.random.default_rng(0), np.random.default_rng(1))
+    assert p.shape == (200, 4) and p.sum(axis=1) == pytest.approx(np.ones(200))
+
+
+@pytest.mark.parametrize("held_out", [0, 1, 1.5])
+def test_a_held_out_share_outside_0_and_1_is_a_bug(held_out):
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        train_rescaled(sure_of_zero, X_UNIQUE, Y_UNIQUE, None, np.random.default_rng(0), held_out=held_out)
