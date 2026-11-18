@@ -6,13 +6,19 @@ Each command is a function run_<name>(args) that returns the exit code. Warnings
 
 import argparse
 import atexit
+import json
+import os
+import re
 import shlex
+import shutil
+import subprocess
 import sys
 import warnings
+from importlib import resources
 from pathlib import Path
 
 from mi_race import __version__, ui
-from mi_race.config import Config, ConfigError, load_config
+from mi_race.config import Config, ConfigError, load_config, parse_config, write_config_file
 from mi_race.dataset import DatasetError
 from mi_race.symbols import SymbolError
 
@@ -48,19 +54,110 @@ def describe_symbols(cfg: Config) -> str:
                      for u, vector in enumerate(encoder.symbols)], color())
 
 
-# --- commands ------------------------------------------------------------------------------------
+def template() -> dict:
+    """the example config shipped inside the package: the start of every new experiment"""
+    return json.loads((resources.files("mi_race") / "templates" / "example.json").read_text(encoding="utf-8"))
 
-def run_check(args) -> int:
-    """mi-race check CONFIG: every rule of the config, then what it sets up"""
-    print(ui.heading("check", args.config, color()))
-    print()
-    cfg = load_config(args.config)                  # a warning about the config appears here, under the heading
+
+def show_config(cfg: Config) -> None:
+    """what a valid config sets up, its codebook, and the ✓ line"""
     print(describe(cfg))
     print()
     print(ui.section("codebook", f"{cfg.encoder.n_symbols} symbols · budget {cfg.encoder.budget}",
                      describe_symbols(cfg), color()))
     print()
     print(ui.done("config is valid", "every rule passed", color=color()))
+
+
+def interactive() -> bool:
+    """someone at a terminal, who can answer questions and use an editor"""
+    return ui.is_terminal(sys.stdin) and ui.is_terminal(sys.stdout)
+
+
+def editor() -> list[str]:
+    """the editor that opens configs: $VISUAL or $EDITOR if set (e.g. 'code -w'), else nano, vi or notepad"""
+    chosen = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+    if chosen:
+        return shlex.split(chosen)
+    for name in ("nano", "vi", "notepad"):
+        if shutil.which(name):
+            return [name]
+    raise OSError("no text editor found: set one, e.g. export EDITOR=nano")
+
+
+def edit_until_valid(path: Path) -> Config | None:
+    """open the config in the editor, and check it when the editor closes;
+    a broken config can be opened again to fix it. Returns the valid config, or None"""
+    while True:
+        command = editor()
+        print(ui.info(f"opening {path} in {Path(command[0]).name} · save and close it to come back", color()))
+        subprocess.run([*command, str(path)])
+        print()
+        try:
+            return load_config(path)
+        except ConfigError as problem:
+            complain(str(problem))
+            print()
+            if not ui.ask("Open it again to fix it?"):
+                return None
+            print()
+
+
+# --- commands ------------------------------------------------------------------------------------
+
+def run_new(args) -> int:
+    """mi-race new NAME: a config for a new experiment, copied from the example, with its own data file
+    (data/NAME.csv) and output folder (outputs/NAME). It is checked before it is written, and an existing
+    file is never overwritten"""
+    path = Path(args.folder) / f"{args.name}.json"
+    print(ui.heading("new", str(path), color()))
+    print()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.name):
+        raise ConfigError(f"'{args.name}' can't be a config name: use letters, digits, - and _")
+    if path.exists():
+        raise ConfigError(f"{path} already exists: pick another name, or edit that file")
+    raw = template()
+    raw["data"]["path"] = f"data/{args.name}.csv"
+    raw["output"]["dir"] = f"outputs/{args.name}"
+    cfg = parse_config(raw)                         # every rule passes before anything is written
+    path.parent.mkdir(parents=True, exist_ok=True)
+    write_config_file(path, raw)
+    print(describe(cfg))
+    print()
+    print(ui.done("config created", str(path), color=color()))
+    print()
+    if interactive() and ui.ask(f"Open {path} in {Path(editor()[0]).name} to set the channel, symbols and decoders?"):
+        print()
+        edited = edit_until_valid(path)
+        if edited is None:
+            return 1
+        show_config(edited)
+        return 0
+    print(ui.facts([("next", f"edit {path}"), ("", f"then: check {path}")], color()))
+    return 0
+
+
+def run_edit(args) -> int:
+    """mi-race edit CONFIG: open a config in the editor, then check it"""
+    path = Path(args.config)
+    print(ui.heading("edit", str(path), color()))
+    print()
+    if not path.exists():
+        raise ConfigError(f"{path} does not exist · 'new NAME' creates a config")
+    if not interactive():
+        raise OSError("edit needs a terminal to open the editor in")
+    edited = edit_until_valid(path)
+    if edited is None:
+        return 1
+    show_config(edited)
+    return 0
+
+
+def run_check(args) -> int:
+    """mi-race check CONFIG: every rule of the config, then what it sets up"""
+    print(ui.heading("check", args.config, color()))
+    print()
+    show_config(load_config(args.config))          # a warning about the config appears here, under the heading
     return 0
 
 
@@ -83,6 +180,15 @@ def build_parser() -> Parser:
     parser = Parser(prog="mi-race", description=ui.DESCRIPTION)
     parser.add_argument("--version", action="version", version=f"mi-race {__version__}")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    new = commands.add_parser("new", help="create a config for a new experiment, from the example")
+    new.add_argument("name", metavar="NAME", help="the experiment's name: letters, digits, - and _")
+    new.add_argument("--folder", default="configs", help="where the config goes (default: configs)")
+    new.set_defaults(run=run_new)
+
+    edit = commands.add_parser("edit", help="open a config in the editor (nano, or $EDITOR), then check it")
+    edit.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
+    edit.set_defaults(run=run_edit)
 
     check = commands.add_parser("check", help="check a config against every rule and show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")
@@ -211,6 +317,6 @@ def main(argv: list[str] | None = None) -> int:
         if not words:
             return shell(parser)
         if ui.is_terminal(sys.stdout) and words[0] not in ("-h", "--help", "--version"):
-            print(ui.banner(next((word for word in words[1:] if not word.startswith("-")), None), color=color()))
+            print(ui.banner(next((word for word in words[1:] if word.endswith(".json")), None), color=color()))
             print()
         return run_command(parser, words)
