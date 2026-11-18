@@ -7,6 +7,7 @@ import re
 import unicodedata
 import os
 
+from mi_race import __version__
 
 PREFIX = "[mi-race]"
 WIDTH = 79                                  # every line stays under 80 columns
@@ -32,14 +33,18 @@ def info(text: str) -> str:
     return _message(f"{PREFIX} ", text)
 
 
+def is_terminal(stream) -> bool:
+    """True for a terminal; False for a file, a pipe, or anything without isatty"""
+    try:
+        return stream.isatty()
+    except (AttributeError, ValueError, OSError):       # no isatty, or a closed stream
+        return False
+
+
 def use_color(stream) -> bool:
     """colour only on a terminal, and never when the NO_COLOR environment variable is set (no-color.org);
     a file or a pipe gets plain text"""
-    try:
-        terminal = stream.isatty()
-    except (AttributeError, ValueError, OSError):       # no isatty, or a closed stream
-        terminal = False
-    return terminal and not os.environ.get("NO_COLOR")
+    return is_terminal(stream) and not os.environ.get("NO_COLOR")
 
 
 def _highlight(text: str, color: bool) -> str:
@@ -75,13 +80,13 @@ def _fit(line: str, width: int) -> list[str]:
     return textwrap.wrap(line, width=width, subsequent_indent=indent, break_long_words=False, break_on_hyphens=False)
 
 
-def box(lines: list[str], title: str = "") -> str:
+def box(lines: list[str], title: str = "", min_width: int = 0) -> str:
     """lines in a box with rounded corners and an optional title in the top border;
-    every line of the box has the same width: at most WIDTH, unless a single word is longer.
-    an item with line breaks (a table) becomes several lines"""
+    every line of the box has the same width: at most WIDTH, unless a single word is longer
+    (or min_width, if that is wider). An item with line breaks (a table) becomes several lines"""
     label = f" {title} " if title else ""
     body = [piece for item in lines for line in item.split("\n") for piece in _fit(line, WIDTH - 4)]   # 4: '│ ' and ' │'
-    inner = max([display_width(line) + 2 for line in body] + [display_width(label)])
+    inner = max([display_width(line) + 2 for line in body] + [display_width(label), min_width - 2])
     left = (inner - display_width(label)) // 2                                                      # the title in the middle
     top = "╭" + "─" * left + label + "─" * (inner - left - display_width(label)) + "╮"
     middle = [f"│ {line}{' ' * (inner - 2 - display_width(line))} │" for line in body]
@@ -120,3 +125,19 @@ def confusion_table(result: dict, color: bool = False, width: int = WIDTH - 4) -
     lines.append("    ".join(f"{paint(value, BOLD)} {name}" for value, name in summary))
     full = max(display_width(line) for line in lines)
     return "\n".join(line + " " * (full - display_width(line)) for line in lines)      # every line the same width
+
+
+BANNER = """\
+███╗   ███╗██╗      ██████╗  █████╗  ██████╗███████╗
+████╗ ████║██║      ██╔══██╗██╔══██╗██╔════╝██╔════╝
+██╔████╔██║██║█████╗██████╔╝███████║██║     █████╗
+██║╚██╔╝██║██║╚════╝██╔══██╗██╔══██║██║     ██╔══╝
+██║ ╚═╝ ██║██║      ██║  ██║██║  ██║╚██████╗███████╗
+╚═╝     ╚═╝╚═╝      ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚══════╝"""
+
+
+def banner(config: str | None = None, version: str = __version__) -> str:
+    """the MI-RACE banner and a box with the version (and the config, if there is one);
+    the CLI prints it only on a terminal"""
+    lines = [f"Version  {version}"] + ([f"Config   {config}"] if config else [])
+    return BANNER + "\n" + box(lines, "mi-race", min_width=max(display_width(line) for line in BANNER.split("\n")))

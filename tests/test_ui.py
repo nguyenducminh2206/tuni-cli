@@ -3,8 +3,9 @@ import io
 
 import numpy as np
 
-from mi_race.ui import (ANSI, CORRECT, PREFIX, RESET, WIDTH, box, confusion_table, display_width,
-                         error, info, warning, use_color)
+from mi_race import __version__
+from mi_race.ui import (ANSI, BANNER, CORRECT, PREFIX, RESET, WIDTH, banner, box, confusion_table, display_width,
+                         error, info, is_terminal, warning, use_color)
 
 
 def test_each_kind_of_message_has_its_prefix():
@@ -206,3 +207,27 @@ def test_many_symbols_are_split_into_blocks_that_fit_in_a_box():
     assert table.count("predicted") == 3                               # 3 blocks of columns
     assert max(widths(table)) <= WIDTH - 4 and max(widths(box([table]))) <= WIDTH
     assert read_table(table, 20) == confusion.tolist()
+
+
+# 7d: banner and version box
+def test_a_box_can_be_made_wider():
+    assert widths(box(["a"], "t", min_width=10)) == {10}
+    assert widths(box(["wider than ten"], min_width=10)) == {18}           # the content still wins
+
+
+def test_the_banner_is_the_art_with_a_version_box_as_wide_as_it():
+    lines = banner("configs/example.json", version="1.2.3").split("\n")
+    art = BANNER.split("\n")
+    assert lines[:len(art)] == art
+    assert widths("\n".join(lines[len(art):])) == {max(display_width(line) for line in art)}
+    assert "│ Version  1.2.3" in lines[len(art) + 1] and "│ Config   configs/example.json" in lines[len(art) + 2]
+    assert all(display_width(line) < 80 for line in lines)
+
+
+def test_the_banner_without_a_config_shows_only_the_version():
+    text = banner()
+    assert f"Version  {__version__}" in text and "Config" not in text
+
+
+def test_is_terminal():
+    assert is_terminal(Terminal()) and not is_terminal(io.StringIO()) and not is_terminal(object())
