@@ -14,6 +14,8 @@ INDENT = " " * (len(PREFIX) + 1)
 HIGHLIGHT = "\033[1;31m"                    # bold red, for warnings and errors
 RESET = "\033[0m"                           # back to normal text
 ANSI = re.compile(r"\033\[[0-9;]*m")        # a colour code: it takes no columns on the screen
+BOLD = "\033[1m"
+CORRECT = "\033[1;32m"                      # bold green: a correct guess
 
 
 def _message(head: str, text: str) -> str:
@@ -84,3 +86,37 @@ def box(lines: list[str], title: str = "") -> str:
     top = "╭" + "─" * left + label + "─" * (inner - left - display_width(label)) + "╮"
     middle = [f"│ {line}{' ' * (inner - 2 - display_width(line))} │" for line in body]
     return "\n".join([top, *middle, "╰" + "─" * inner + "╯"])
+
+
+def confusion_table(result: dict, color: bool = False, width: int = WIDTH - 4) -> str:
+    """one decoder's confusion matrix and summary, from evaluate(): 'predicted' across, 'sent' down,
+    a zero shown as '·', then accuracy, macro F1 and the BA bound. If color (a terminal), the correct guesses
+    (the diagonal) are bold green. Many symbols are split into blocks of columns that fit in width"""
+    rows = [[int(count) for count in row] for row in result["confusion_matrix"]]
+    n = len(rows)
+    digits = len(str(n - 1))
+    number = max(len(str(value)) for value in [n - 1, *(count for row in rows for count in row)])
+    cell = number + 6                                                # a number in the middle, 3 spaces each side
+    left = len("sent  ") + digits + 2                                # 'sent  1  ' in front of each row
+    per_block = max(1, (width - left) // cell)
+
+    def paint(text: str, style: str) -> str:
+        return f"{style}{text}{RESET}" if color else text
+
+    def count(u: int, v: int) -> str:
+        text = f"{rows[u][v] or '·':>{number}}".center(cell)          # units under units
+        return paint(text, CORRECT) if u == v else text
+
+    lines = []
+    for first in range(0, n, per_block):
+        columns = range(first, min(first + per_block, n))
+        lines += [" " * left + "predicted".center(cell * len(columns)),
+                  " " * left + "".join(f"{v:>{number}}".center(cell) for v in columns), ""]
+        lines += [f"{'sent' if u == (n - 1) // 2 else '':>4}  {u:>{digits}}  " + "".join(count(u, v) for v in columns)
+                  for u in range(n)]
+        lines.append("")
+    summary = [(f"{result['accuracy']:.1%}", "accuracy"), (f"{result['macro_f1']:.3f}", "macro F1"),
+               (f"{result['ba_bound_bits']:.3f} bits", "BA bound")]
+    lines.append("    ".join(f"{paint(value, BOLD)} {name}" for value, name in summary))
+    full = max(display_width(line) for line in lines)
+    return "\n".join(line + " " * (full - display_width(line)) for line in lines)      # every line the same width

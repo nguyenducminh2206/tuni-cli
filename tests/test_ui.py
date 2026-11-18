@@ -1,7 +1,10 @@
 from pathlib import Path
 import io
 
-from mi_race.ui import ANSI, PREFIX, WIDTH, box, display_width, error, info, warning, use_color
+import numpy as np
+
+from mi_race.ui import (ANSI, CORRECT, PREFIX, RESET, WIDTH, box, confusion_table, display_width,
+                         error, info, warning, use_color)
 
 
 def test_each_kind_of_message_has_its_prefix():
@@ -139,3 +142,67 @@ def test_colour_only_on_a_terminal_and_never_with_no_color(monkeypatch):
     assert not use_color(Terminal())
     monkeypatch.setenv("NO_COLOR", "")                     # no-color.org: an empty value does not count
     assert use_color(Terminal())
+
+
+# 7c: the confusion matrix
+SMALL = {"confusion_matrix": [[28, 2], [3, 27]], "accuracy": 55 / 60, "macro_f1": 0.9166, "ba_bound_bits": 0.5}
+FOREST = {"confusion_matrix": [[40, 17, 3, 0], [8, 39, 13, 0], [0, 6, 43, 11], [0, 0, 4, 56]],       # the example forest
+          "accuracy": 0.742, "macro_f1": 0.740, "ba_bound_bits": 0.859}
+
+
+def read_table(table, n):
+    """the counts back from a table ('·' is 0), block by block"""
+    lines = ANSI.sub("", table).split("\n")
+    matrix = {}
+    for i, line in enumerate(lines):
+        if line.strip() == "predicted":
+            columns = [int(v) for v in lines[i + 1].split()]
+            for row in lines[i + 3:i + 3 + n]:
+                u, *counts = row.replace("sent", "").split()
+                matrix.update({(int(u), v): 0 if c == "·" else int(c) for v, c in zip(columns, counts)})
+    return [[matrix[u, v] for v in range(n)] for u in range(n)]
+
+
+def test_a_confusion_table_by_hand():
+    assert [line.rstrip() for line in confusion_table(SMALL).split("\n")] == [
+        "            predicted",
+        "             0       1",
+        "",
+        "sent  0     28       2",
+        "      1      3      27",
+        "",
+        "91.7% accuracy    0.917 macro F1    0.500 bits BA bound"]
+
+
+def test_every_line_of_a_confusion_table_has_the_same_width():
+    for color in (False, True):
+        table = confusion_table(FOREST, color=color)
+        assert len(widths(table)) == 1 and len(widths(box([table], "random forest"))) == 1
+        assert read_table(table, 4) == FOREST["confusion_matrix"]
+
+
+def test_only_the_correct_guesses_are_bold_green():
+    assert CORRECT == "\033[1;32m"                                      # bold (1), green (32)
+    lines = confusion_table({**SMALL, "confusion_matrix": [[30, 0], [3, 27]]}, color=True).split("\n")
+    assert lines[3].startswith("sent  0  " + CORRECT + "   30   " + RESET + "    ·   ")
+    assert lines[4].startswith("      1  " + "    3   " + CORRECT + "   27   " + RESET)
+    codes = ANSI.findall(confusion_table(FOREST, color=True))
+    assert codes.count(CORRECT) == 4 and len(codes) == 2 * (4 + 3)      # the diagonal and the 3 bold numbers, each reset
+
+
+def test_colour_changes_nothing_but_the_colour():
+    assert ANSI.sub("", confusion_table(FOREST, color=True)) == confusion_table(FOREST)
+    assert "\033" not in confusion_table(FOREST)
+
+
+def test_sent_is_written_on_the_middle_row():
+    lines = confusion_table({**SMALL, "confusion_matrix": np.diag([9] * 5)}).split("\n")
+    assert [line.startswith("sent") for line in lines[3:8]] == [False, False, True, False, False]
+
+
+def test_many_symbols_are_split_into_blocks_that_fit_in_a_box():
+    confusion = np.random.default_rng(0).integers(0, 100, size=(20, 20))
+    table = confusion_table({**SMALL, "confusion_matrix": confusion})
+    assert table.count("predicted") == 3                               # 3 blocks of columns
+    assert max(widths(table)) <= WIDTH - 4 and max(widths(box([table]))) <= WIDTH
+    assert read_table(table, 20) == confusion.tolist()
