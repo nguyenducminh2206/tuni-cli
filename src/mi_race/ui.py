@@ -256,3 +256,35 @@ class Progress:
         if self.show and not self.over:                             # stopped early: give the cursor back
             self.stream.write(SHOW_CURSOR)
             self.stream.flush()
+
+
+# --- 7f: questions -------------------------------------------------------------------------------
+
+ANSWERS = {"y": True, "yes": True, "n": False, "no": False}
+
+
+def ask(text: str, yes: bool = True, accept_defaults: bool = False, read=input, stdin=None, out=None) -> bool:
+    """a yes/no question, answered on the terminal: Enter takes the default (the capital letter),
+    y/yes/n/no are accepted in any case, anything else asks again. Ctrl-D also takes the default.
+    With accept_defaults (--yes), or without a terminal to answer on (a batch job), the default is taken
+    and written after the question, so the output shows what was decided and why"""
+    stdin, out = stdin or sys.stdin, out or sys.stdout
+    color = use_color(out)
+    prompt = question(text, yes, color)
+    if accept_defaults or not is_terminal(stdin):
+        note = f"{'yes' if yes else 'no'} · the default ({'--yes' if accept_defaults else 'no terminal'})"
+        room = WIDTH - display_width(prompt.split("\n")[-1])        # does the note fit after the question?
+        out.write((prompt if len(note) <= room else prompt.rstrip() + "\n" + TEXT_INDENT) + paint(note, DIM, color) + "\n")
+        out.flush()
+        return yes
+    while True:
+        try:
+            answer = read(prompt).strip().lower()
+        except EOFError:                                            # Ctrl-D: the default
+            out.write("\n")
+            return yes
+        if not answer:
+            return yes
+        if answer in ANSWERS:
+            return ANSWERS[answer]
+        out.write(TEXT_INDENT + paint(f"answer y or n (Enter: {'yes' if yes else 'no'})", DIM, color) + "\n")
