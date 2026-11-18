@@ -14,16 +14,25 @@ import shutil
 import subprocess
 import sys
 import warnings
+from dataclasses import asdict
+from datetime import datetime
 from importlib import resources
 from pathlib import Path
 
+import numpy as np
+
 from mi_race import __version__, ui
-from mi_race.config import Config, ConfigError, load_config, parse_config, write_config_file
-from mi_race.dataset import DatasetError
+from mi_race.config import Config, ConfigError, load_config, parse_config, read_config_file, write_config_file
+from mi_race.dataset import (DatasetError, check_dataset, read_dataset, simulate_dataset, split_dataset,
+                             write_dataset)
+from mi_race.decoders.rescaling import train_rescaled
+from mi_race.metrics import evaluate
+from mi_race.search import TRAINERS
+from mi_race.streams import random_stream
 from mi_race.symbols import SymbolError, ask_symbols, write_symbols
-from mi_race.dataset import DatasetError, simulate_dataset, write_dataset
 
 DECODER_NAMES = {"random_forest": "random forest", "mlp": "MLP", "cnn": "CNN"}
+UNITS = {"random_forest": "trees", "mlp": "epochs", "cnn": "epochs"}       # what a decoder's progress counts
 
 
 def color() -> bool:
@@ -214,6 +223,53 @@ def size(path: Path) -> str:
         count /= 1000
 
 
+def simulate_and_write(cfg: Config) -> np.ndarray:
+    """simulate the dataset with a progress bar, then save it to data.path"""
+    with ui.Progress("simulating", "dataset simulated", unit="runs") as bar:
+        rows = simulate_dataset(cfg, bar)
+    write_dataset(cfg.data.path, rows)
+    return rows
+
+
+def dataset_for(cfg: Config, config_path: str) -> np.ndarray:
+    """the dataset of a config: read from data.path, or simulated after a yes when it is missing,
+    or when the config was changed after the dataset was simulated"""
+    path = Path(cfg.data.path)
+    if not path.exists():
+        if not ui.ask(f"{path} does not exist yet. Simulate it now?"):
+            raise DatasetError(f"no dataset · 'simulate {config_path}' makes it")
+        print()
+        return simulate_and_write(cfg)
+    if Path(config_path).stat().st_mtime > path.stat().st_mtime:
+        if ui.ask(f"{config_path} was changed after {path} was simulated. Simulate it again?"):
+            print()
+            return simulate_and_write(cfg)
+        print()
+    rows = read_dataset(path)
+    check_dataset(rows, cfg)
+    print(ui.done("dataset loaded", f"{len(rows)} runs", str(path), color=color()))
+    return rows
+
+
+def comparison(results: dict) -> str:
+    """every decoder in one table: plain accuracy, hard MI and BA bound, then T and the rescaled BA bound;
+    the best rescaled bound in bold"""
+    header = ["decoder", "accuracy", "hard MI", "BA bound", "T", "BA rescaled"]
+    rows = [[DECODER_NAMES[name], f"{r['plain']['accuracy']:.1%}", f"{r['plain']['hard_decision_mi_bits']:.3f}",
+             f"{r['plain']['ba_bound_bits']:.3f}", f"{r['rescaled']['temperature']:.2f}",
+             f"{r['rescaled']['ba_bound_bits']:.3f}"] for name, r in results.items()]
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(len(header))]
+    best = max(r["rescaled"]["ba_bound_bits"] for r in results.values())
+
+    def line(cells: list[str], style: str = "", bold_last: bool = False) -> str:
+        text = [cells[0].ljust(widths[0])] + [cell.rjust(width) for cell, width in zip(cells[1:], widths[1:])]
+        if bold_last:
+            text[-1] = ui.paint(text[-1], ui.BOLD, color())
+        return ui.INDENT + (ui.paint("   ".join(text), style, color()) if style else "   ".join(text))
+
+    return "\n".join([line(header, ui.DIM)] + [line(row, bold_last=row[-1] == f"{best:.3f}") for row in rows])
+
+
 def run_simulate(args) -> int:
     """mi-race simulate CONFIG: run the channel for every symbol, as many times as the config says,
     and save the receiver signals as the dataset (CSV). The same config always gives the same dataset"""
@@ -233,9 +289,7 @@ def run_simulate(args) -> int:
             print(ui.info(f"nothing simulated · {path} is unchanged", color()))
             return 0
         print()
-    with ui.Progress("simulating", "dataset simulated", unit="runs") as bar:
-        rows = simulate_dataset(cfg, bar)
-    write_dataset(path, rows)
+    rows = simulate_and_write(cfg)
     absorbed = rows[:, 1:].sum(axis=1)
     print()
     print(ui.section("absorbed by the receiver", f"mean over {data.runs_per_symbol} runs, of {encoder.budget} released",
@@ -245,6 +299,61 @@ def run_simulate(args) -> int:
     print()
     print(ui.done("dataset written", f"{len(rows)} runs", size(path), color=color()))
     print(ui.facts([("file", str(path.resolve()))], color()))
+    return 0
+
+
+def run_run(args) -> int:
+    """mi-race run CONFIG: train every decoder of the config on the training runs, plain and rescaled
+    (T fitted on a fifth of the training runs), and score them on the test runs. The results, with the
+    config, seed and version, go to output.dir/metrics.json"""
+    print(ui.heading("run", args.config, color()))
+    print()
+    cfg = load_config(args.config)
+    if not cfg.decoders:
+        raise ConfigError(f"{args.config} has no decoders: add one to its 'decoders' section")
+    data = cfg.data
+    n_test = round(data.runs_per_symbol * data.test_fraction) * cfg.encoder.n_symbols
+    output = Path(cfg.output.dir) / "metrics.json"
+    print(ui.facts([("dataset", data.path),
+                    ("split", f"{data.runs_per_symbol * cfg.encoder.n_symbols - n_test} training runs · "
+                              f"{n_test} test runs · seed {cfg.seed}"),
+                    ("decoders", " · ".join(DECODER_NAMES[name] for name in cfg.decoders) + " · plain and rescaled"),
+                    ("results", str(output))], color()))
+    print()
+    rows = dataset_for(cfg, args.config)
+    train, test = split_dataset(rows, data.test_fraction, random_stream(cfg.seed, "split"))
+    X, y, X_test, y_test = train[:, 1:], train[:, 0], test[:, 1:], test[:, 0]
+    results = {}
+    for name, settings in cfg.decoders.items():
+        title = DECODER_NAMES[name]
+        with ui.Progress(title, f"{title} trained", unit=UNITS[name]) as bar:
+            model = TRAINERS[name](X, y, settings, random_stream(cfg.seed, name), progress=bar)
+        with ui.Progress("rescaled", f"{title} rescaled", unit=UNITS[name]) as bar:
+            rescaled = train_rescaled(TRAINERS[name], X, y, settings, random_stream(cfg.seed, name), progress=bar)
+        results[name] = {"settings": asdict(settings),
+                         "plain": evaluate(y_test, model.predict_proba(X_test)),
+                         "rescaled": evaluate(y_test, rescaled.predict_proba(X_test)) | {"temperature": rescaled.temperature},
+                         "training_loss": getattr(model, "losses", None)}
+    for name, result in results.items():
+        plain, rescaled = result["plain"], result["rescaled"]
+        print()
+        print(ui.section(DECODER_NAMES[name], f"{plain['n_test']} test runs", ui.confusion_table(plain, color()), color()))
+        print()
+        print(ui.facts([("hard MI", f"{plain['hard_decision_mi_bits']:.3f} bits · reads about "
+                                    f"{plain['mi_bias_bits']:.3f} high on {plain['n_test']} runs"),
+                        ("rescaled", f"BA bound {rescaled['ba_bound_bits']:.3f} bits · T {rescaled['temperature']:.2f} · "
+                                     f"accuracy {rescaled['accuracy']:.1%}")], color()))
+    print()
+    print(ui.section("all decoders", "bits · T fitted on held-back training runs",
+                     comparison(results), color()))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({"mi_race": __version__, "created": datetime.now().isoformat(timespec="seconds"),
+                                  "config_file": args.config, "config": read_config_file(args.config),
+                                  "seed": cfg.seed, "dataset": data.path, "n_train": len(train), "n_test": len(test),
+                                  "decoders": results}, indent=2) + "\n", encoding="utf-8")
+    print()
+    print(ui.done("results saved", f"{len(results)} decoders", size(output), color=color()))
+    print(ui.facts([("file", str(output.resolve()))], color()))
     return 0
 
 
@@ -293,6 +402,10 @@ def build_parser() -> Parser:
     simulate = commands.add_parser("simulate", help="simulate the dataset: every symbol through the channel")
     simulate.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
     simulate.set_defaults(run=run_simulate)
+
+    run = commands.add_parser("run", help="train and score every decoder, plain and rescaled; save metrics.json")
+    run.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
+    run.set_defaults(run=run_run)
 
     check = commands.add_parser("check", help="check a config against every rule and show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")
