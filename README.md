@@ -165,6 +165,7 @@ Each decoder learns from the training runs and gives, for each test run, a proba
 - The CNN standardises all values with one mean and one spread, so the signal keeps its shape over time.
 - The MLP and the CNN are trained with Adam on the cross-entropy loss: 30 epochs, batches of 64, learning rate 0.001. The training runs are shuffled in a new order every epoch.
 - Scalers are fitted on the training runs only.
+- Any decoder can also be **rescaled** with one temperature, fitted on held-back training runs (section 6).
 
 ## 6. Measuring information
 
@@ -209,7 +210,18 @@ I_{\text{BA}} = \log_2 N - \frac{\text{log-loss}}{\ln 2}
 **The Barber–Agakov (BA) bound** is a lower bound on the mutual information between symbol and signal, for any decoder (Barber and Agakov, 2003). It is the main number in mi-race:
 
 - It uses the decoder's full probabilities, not only its guesses.
-- It is only as good as the decoder is honest about its confidence. A decoder that is sure but wrong pays a lot of log-loss, so it can have high accuracy and a low bound (section 9).
+- It is only as good as the decoder is honest about its confidence. A decoder that is sure but wrong pays a lot of log-loss, so it can have high accuracy and a low bound (section 9). Temperature rescaling corrects this.
+
+**Temperature rescaling** (Guo et al., 2017) replaces a decoder's probabilities $p_k$ by
+
+```math
+q_k = \frac{p_k^{1/T}}{\sum_j p_j^{1/T}}
+```
+
+- $T > 1$ softens an overconfident decoder, $T < 1$ sharpens an underconfident one, and $T = 1$ changes nothing. For the networks it is the same as dividing their outputs by $T$ before the softmax.
+- The order of the probabilities is kept, so the guess never changes.
+- **Fitting $T$:** 20% of each symbol's training runs are held back, and the decoder trains on the rest. $T$ is the value with the lowest log-loss on the held-back runs, out of 401 values spaced evenly on a log scale from 0.05 to 20 (1 included).
+- The test runs are never used to fit $T$.
 
 ## 7. Learning the codebook
 
@@ -217,12 +229,14 @@ The encoder search looks for a codebook with a higher BA bound by moving molecul
 
 ### 7.1 Scoring a codebook
 
-`score_codebook(config, codebook, seed)`:
+`score_codebook(config, codebook, seed, decoder, rescaled)`:
 
 1. Simulate a dataset for this codebook in memory, with the given seed.
-2. Split it into 5 stratified folds. Train a random forest on 4 folds and predict the fifth, so every run is scored by a forest that never saw it.
+2. Split it into 5 stratified folds. Train the decoder on 4 folds and predict the fifth, so every run is scored by a decoder that never saw it. If rescaled, each fold's decoder also fits its own temperature on a fifth of its training runs.
 3. Raise tiny probabilities to a floor and renormalise (below).
 4. Return the BA bound of these probabilities.
+
+The decoder is the random forest by default, or the MLP or the CNN. The final search uses the rescaled MLP (section 7.5).
 
 **The floor:**
 
@@ -232,29 +246,30 @@ q_k = \frac{\max(p_k, \varepsilon)}{\sum_j \max(p_j, \varepsilon)}, \qquad \vare
 
 $\varepsilon$ is half of one tree's vote with 200 trees. In an early test without the floor, a single run that the forest gave probability 0 cost about 0.19 bits of the whole score.
 
-One score takes about 1 s.
+One score takes about 1 s with the forest or the MLP, and about 20 s with the CNN.
 
 ### 7.2 Moves
 
-A move shifts a **chunk** of molecules (default 10) of one symbol from one slot to another. It is legal if the source slot holds at least a chunk, the target is a different slot, and the new symbol is not equal to another one. The budget never changes. Each step picks one legal move at random, all equally likely.
+A move shifts a **chunk** of molecules (default 10) of one symbol from one slot to another. It is legal if the source slot holds at least a chunk, the target is a different slot, and the new symbol is not equal to another one. The budget never changes. Each step picks one legal move at random, all equally likely. With a chunk of 50, the whole budget, a move relocates a symbol's whole burst.
 
 ### 7.3 Accepting a move
 
 At every step, the current codebook (parent) and the moved one (candidate) are scored **on the same new dataset**. The move is kept only if
 
 ```math
-\text{score(candidate)} - \text{score(parent)} > 0.02 \text{ bits}.
+\text{score(candidate)} - \text{score(parent)} > \theta .
 ```
 
-Scoring both on the same dataset (a *paired* comparison) makes their difference much less noisy, because the symbols the move did not change get exactly the same runs. Measured spread of the difference:
+Scoring both on the same dataset (a *paired* comparison) makes their difference much less noisy, because the symbols the move did not change get exactly the same runs. Measured spread of the difference for an almost neutral move (10 molecules of one symbol moved by one slot):
 
-| Scoring                 | sd of the difference (bits) |
-| ----------------------- | --------------------------- |
-| different datasets      | 0.036                       |
-| same dataset, one split | 0.018                       |
-| same dataset, 5 folds   | 0.010                       |
+| Decoder      | Scoring                 | sd of the difference (bits) |
+| ------------ | ----------------------- | --------------------------- |
+| forest       | different datasets      | 0.036                       |
+| forest       | same dataset, one split | 0.018                       |
+| forest       | same dataset, 5 folds   | 0.010                       |
+| rescaled MLP | same dataset, 5 folds   | 0.026                       |
 
-The threshold of 0.02 is about twice that spread.
+The threshold $\theta$ is about twice the spread of the decoder that scores: 0.02 bits for the forest and 0.05 for the rescaled MLP.
 
 ### 7.4 Checking progress
 
@@ -264,22 +279,48 @@ The threshold of 0.02 is about twice that spread.
 - **Three kinds of datasets are kept apart:**
   - *search* datasets: one per step;
   - *check* datasets: for comparing codebooks and settings;
-  - *final* datasets: reserved for the reported result.
+  - *final* datasets: used once, for the reported result (section 7.6).
 
-### 7.5 Results so far (check datasets)
+### 7.5 Choosing the settings (check datasets)
 
-Two starting codebooks were used: **"close"** (bursts at slots 0, 1, 2, 3) and the **hand-picked** codebook of section 2 (slots 0, 3, 6, 9). Each start had 5 search runs of 200 steps, with chunk 10 and threshold 0.02.
+Every choice was made on search and check datasets. Two starting codebooks were used: **"close"** (bursts at slots 0, 1, 2, 3) and the **hand-picked** codebook of section 2 (slots 0, 3, 6, 9). Each setting had 5 search runs.
 
-| Start | Start score | After 200 steps | Gain over start |
-|---|---|---|---|
-| close | 0.216 | 0.660 – 0.789 (mean 0.716) | +0.44 to +0.57 |
-| hand-picked | 0.892 | 0.884 – 0.902 | −0.007 to +0.010 |
+| Feedback | Chunk | $\theta$ | From close (100 steps) | Hand-picked |
+|---|---|---|---|---|
+| forest | 10 | 0.02 | 0.632 – 0.755 | 0.892 |
+| forest | 50 | 0.02 | 0.900 – 0.914 | 0.892 |
+| rescaled MLP | 50 | 0.05 | 1.132 – 1.214 | 1.202 |
 
-Scores are in bits.
+Check scores in bits, each under the search's own feedback.
 
-- **From "close", the search climbs every time.** Most of the gain comes in the first 100 steps: the mean is 0.696 at 100 steps against 0.716 at 200.
-- **Each run stops at a different level, all below the hand-picked codebook.** A likely reason: moving a whole burst far takes several moves of 10 molecules, and the first of them rarely gains enough to be kept.
-- **From the hand-picked codebook, almost nothing is kept:** 14 of 1,000 moves. That is about the share noise alone lets through at this threshold, and none of them was a real gain.
+- **Small moves get stuck.** With chunk 10, every run from close climbed but stopped below hand-picked. Moving a whole burst takes 5 moves of 10, and the first of them rarely gains enough to be kept.
+- **The forest's preference did not hold for the other decoders.**
+  - With chunk 50, 4 of 5 runs ended at bursts in slots 0, 1, 6, 9, above hand-picked on the forest's bound.
+  - But this codebook makes symbols 0 and 1 almost impossible to tell apart. Under the rescaled MLP and CNN it is 0.24–0.30 bits worse than hand-picked.
+  - The forest is underconfident ($T \approx 0.45$), and its bound favoured a codebook where being unsure is right.
+- **So the feedback must be calibrated.** With the rescaled MLP as feedback:
+  - 3 of 5 runs from close found the hand-picked codebook itself, with the symbols numbered differently;
+  - from hand-picked, none of 1,000 moves of a whole or a half burst was kept.
+- **Frozen settings:** rescaled MLP feedback, chunk 50, $\theta = 0.05$, 100 steps.
+
+### 7.6 Final result (final datasets)
+
+The frozen search was run on fresh random streams, 5 runs from each start. Then every codebook involved was evaluated once on 10 final datasets never used before: one stratified split each (240 test runs), with every decoder rescaled.
+
+Mean BA bound in bits (± standard error over the 10 datasets):
+
+| Decoder | close | hand-picked | found (4 codebooks) | found − hand-picked |
+|---|---|---|---|---|
+| Random forest | 0.190 | 0.979 ± 0.027 | 0.995 – 1.026 | +0.016 to +0.047 |
+| MLP | 0.246 | 1.172 ± 0.029 | 1.125 – 1.199 | −0.047 to +0.027 |
+| CNN | 0.234 | 1.219 ± 0.020 | 1.178 – 1.249 | −0.042 to +0.029 |
+
+- **The search reliably improves a poor codebook.** All 5 runs from close end 0.8–1.0 bits higher, under every decoder.
+- **It reaches the hand-picked codebook but does not beat it.**
+  - 3 of 5 runs found it (slots 0, 3, 6, 9), and the other 2 found slots 0, 4, 7, 9.
+  - No difference from hand-picked reaches 2 standard errors; the standard errors are 0.016–0.035 bits.
+  - From hand-picked, no move was kept.
+- **For this channel, at least 1.22 ± 0.02 of the possible 2 bits get through** with single bursts spread evenly over the release window (rescaled CNN).
 
 ## 8. Reproducibility
 
@@ -330,14 +371,18 @@ A molecule needs 3 s on average to reach the receiver, longer than the 2 s windo
 
 Decoders on the test runs:
 
-| Decoder       | Accuracy        | Hard-decision MI (bits) | BA bound (bits) |
-| ------------- | --------------- | ----------------------- | --------------- |
-| Random forest | 0.742           | 1.022                   | **0.859** |
-| MLP           | 0.779           | 1.124                   | 0.667           |
-| CNN           | **0.825** | **1.194**         | 0.490           |
+| Decoder       | Accuracy  | Hard-decision MI | BA bound  | $T$  | BA bound, rescaled |
+| ------------- | --------- | ---------------- | --------- | ---- | ------------------ |
+| Random forest | 0.742     | 1.022            | **0.859** | 0.46 | 0.955              |
+| MLP           | 0.779     | 1.124            | 0.667     | 2.85 | 1.132              |
+| CNN           | **0.825** | **1.194**        | 0.490     | 3.91 | **1.364**          |
+
+Information in bits. $T$ is the temperature fitted for rescaling (section 6).
 
 - The MI bias is 0.027 bits, and accuracy has a standard error of about 0.03.
-- **The CNN guesses best but has the lowest BA bound.** After 30 epochs it is too sure of itself, and each confident mistake costs a lot of log-loss. This is why the encoder search uses the random forest.
+- **The CNN guesses best but has the lowest BA bound.** After 30 epochs it is too sure of itself, and each confident mistake costs a lot of log-loss.
+- **Rescaled, the ranking turns around.** Softening the CNN ($T = 3.91$) gives it the highest bound, 1.364 bits. The forest is the opposite: it is underconfident, and $T = 0.46$ sharpens it.
+- The rescaled decoders train on 80% of the training runs, so their accuracy is 0.713 (forest), 0.758 (MLP) and 0.825 (CNN).
 
 ## 10. Validation
 
@@ -354,9 +399,15 @@ The test suite (pytest) checks:
 - **Signal:** the counting rule of section 3.4.
 - **Decoders:** the same seed gives the same probabilities, decoders don't affect each other, and scalers are fitted on training runs only.
 - **Metrics:** hand-computed cases, and agreement with scikit-learn.
+- **Rescaling:**
+  - hand-computed cases;
+  - $T = 1$ changes nothing, and the guess never changes;
+  - a fitted $T$ recovers a known over- or underconfidence;
+  - $T$ is fitted only on the held-back training runs.
 - **Search:**
   - the budget is kept, and only legal moves are made, all equally likely;
-  - the acceptance rule, the paired datasets and the separate check datasets are tested with controlled scores.
+  - the acceptance rule, the paired datasets and the separate check datasets are tested with controlled scores;
+  - a codebook can be scored with every decoder, plain or rescaled.
 
 The notebook `notebooks/channel.ipynb` walks through the channel step by step. Its last part compares the simulated mean of $A(t)$ and of $rx_m$ with the exact formula of section 3.5, and they agree within the noise.
 
@@ -369,10 +420,10 @@ The notebook `notebooks/channel.ipynb` walks through the channel step by step. I
 - SSA channel;
 - dataset;
 - random forest, MLP and CNN decoders;
-- information measures;
-- encoder search with checks and learning curves.
+- information measures and temperature rescaling;
+- encoder search with checks, learning curves and a choice of decoder as feedback.
 
-**In progress:** experiments with the encoder search settings.
+**Done:** experiments to choose the search settings (section 7.5) and the final evaluation (section 7.6).
 
 ## 12. Software
 
@@ -384,7 +435,7 @@ Python 3.10 or newer, with NumPy, scikit-learn and PyTorch. Everything runs on t
 | `encoder.py` | release vector → releases (2)         |
 | `channel.py` | Markov chain, SSA, receiver signal (3) |
 | `dataset.py` | simulation and split (4)               |
-| `decoders/`  | random forest, MLP, CNN (5)            |
+| `decoders/`  | random forest, MLP, CNN, rescaling (5, 6) |
 | `metrics.py` | information measures (6)               |
 | `search.py`  | encoder search (7)                     |
 | `streams.py` | random streams (8)                     |
@@ -395,6 +446,7 @@ Python 3.10 or newer, with NumPy, scikit-learn and PyTorch. Everything runs on t
 - Barber, D., and Agakov, F. (2003). The IM algorithm: a variational approach to information maximization. *Advances in Neural Information Processing Systems 16*.
 - Breiman, L. (2001). Random forests. *Machine Learning*, 45(1), 5–32.
 - Gillespie, D. T. (1977). Exact stochastic simulation of coupled chemical reactions. *The Journal of Physical Chemistry*, 81(25), 2340–2361.
+- Guo, C., Pleiss, G., Sun, Y., and Weinberger, K. Q. (2017). On calibration of modern neural networks. *Proceedings of the 34th International Conference on Machine Learning*, PMLR 70, 1321–1330.
 - Treves, A., and Panzeri, S. (1995). The upward bias in measures of information derived from limited data samples. *Neural Computation*, 7(2), 399–407.
 
 ## License
