@@ -21,6 +21,7 @@ from mi_race import __version__, ui
 from mi_race.config import Config, ConfigError, load_config, parse_config, write_config_file
 from mi_race.dataset import DatasetError
 from mi_race.symbols import SymbolError, ask_symbols, write_symbols
+from mi_race.dataset import DatasetError, simulate_dataset, write_dataset
 
 DECODER_NAMES = {"random_forest": "random forest", "mlp": "MLP", "cnn": "CNN"}
 
@@ -204,6 +205,49 @@ def run_symbols(args) -> int:
     return 0
 
 
+def size(path: Path) -> str:
+    """a file's size, readable: '1.2 MB'"""
+    count = path.stat().st_size
+    for unit in ("bytes", "kB", "MB"):
+        if count < 1000 or unit == "MB":
+            return f"{count:.0f} {unit}" if unit == "bytes" else f"{count:.1f} {unit}"
+        count /= 1000
+
+
+def run_simulate(args) -> int:
+    """mi-race simulate CONFIG: run the channel for every symbol, as many times as the config says,
+    and save the receiver signals as the dataset (CSV). The same config always gives the same dataset"""
+    print(ui.heading("simulate", args.config, color()))
+    print()
+    cfg = load_config(args.config)
+    encoder, data = cfg.encoder, cfg.data
+    path = Path(data.path)
+    print(ui.facts([("runs", f"{data.runs_per_symbol} per symbol · {encoder.n_symbols} symbols · "
+                             f"{data.runs_per_symbol * encoder.n_symbols} in all"),
+                    ("signal", f"{cfg.channel.n_intervals + 1} values per run · one every {cfg.channel.dt:g} s"),
+                    ("seed", str(cfg.seed)),
+                    ("file", str(path))], color()))
+    print()
+    if path.exists():
+        if not ui.ask(f"{path} already exists. Simulate it again and replace it?"):
+            print(ui.info(f"nothing simulated · {path} is unchanged", color()))
+            return 0
+        print()
+    with ui.Progress("simulating", "dataset simulated", unit="runs") as bar:
+        rows = simulate_dataset(cfg, bar)
+    write_dataset(path, rows)
+    absorbed = rows[:, 1:].sum(axis=1)
+    print()
+    print(ui.section("absorbed by the receiver", f"mean over {data.runs_per_symbol} runs, of {encoder.budget} released",
+                     ui.facts([(f"symbol {u}", f"{absorbed[rows[:, 0] == u].mean():.1f}  "
+                                               f"({absorbed[rows[:, 0] == u].mean() / encoder.budget:.0%})")
+                               for u in range(encoder.n_symbols)], color()), color()))
+    print()
+    print(ui.done("dataset written", f"{len(rows)} runs", size(path), color=color()))
+    print(ui.facts([("file", str(path.resolve()))], color()))
+    return 0
+
+
 def run_check(args) -> int:
     """mi-race check CONFIG: every rule of the config, then what it sets up"""
     print(ui.heading("check", args.config, color()))
@@ -245,6 +289,10 @@ def build_parser() -> Parser:
     symbols.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
     symbols.add_argument("--count", type=int, help="how many symbols (default: as many as the config has)")
     symbols.set_defaults(run=run_symbols)
+
+    simulate = commands.add_parser("simulate", help="simulate the dataset: every symbol through the channel")
+    simulate.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
+    simulate.set_defaults(run=run_simulate)
 
     check = commands.add_parser("check", help="check a config against every rule and show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")
