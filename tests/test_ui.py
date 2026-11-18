@@ -1,6 +1,7 @@
 from pathlib import Path
+import io
 
-from mi_race.ui import PREFIX, WIDTH, box, display_width, error, info, warning
+from mi_race.ui import ANSI, PREFIX, WIDTH, box, display_width, error, info, warning, use_color
 
 
 def test_each_kind_of_message_has_its_prefix():
@@ -100,3 +101,41 @@ def test_a_word_too_long_for_a_box_is_never_cut():
 def test_a_table_given_as_one_text_becomes_several_lines():
     table = "   0   1\n0  28   2\n1   3  27"
     assert box([table]).split("\n")[1:-1] == ["│    0   1  │", "│ 0  28   2 │", "│ 1   3  27 │"]
+
+# warnings and errors in bold red
+RED, RESET = "\033[1;31m", "\033[0m"
+
+
+def test_warnings_and_errors_can_be_bold_red():
+    assert error("config file not found", color=True) == RED + "[mi-race] error: config file not found" + RESET
+    assert warning("only 50 runs", color=True) == RED + "[mi-race] warning: only 50 runs" + RESET
+
+
+def test_plain_text_is_the_default():
+    assert "\033" not in error("x") + warning("x") + info("x")
+
+
+def test_every_line_of_a_long_message_is_coloured_and_the_text_is_unchanged():
+    text = " ".join(f"word{i}" for i in range(40)) + "\nsecond line"
+    lines = error(text, color=True).split("\n")
+    assert len(lines) > 2 and all(line.startswith(RED) and line.endswith(RESET) for line in lines)
+    assert ANSI.sub("", error(text, color=True)) == error(text)
+
+
+def test_colour_codes_take_no_columns():
+    assert display_width(error("x", color=True)) == len("[mi-race] error: x")
+    assert len(widths(box([error("inside a box", color=True), "plain"]))) == 1
+
+
+class Terminal(io.StringIO):
+    def isatty(self):
+        return True
+
+
+def test_colour_only_on_a_terminal_and_never_with_no_color(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert use_color(Terminal()) and not use_color(io.StringIO()) and not use_color(object())
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert not use_color(Terminal())
+    monkeypatch.setenv("NO_COLOR", "")                     # no-color.org: an empty value does not count
+    assert use_color(Terminal())

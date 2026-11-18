@@ -5,11 +5,15 @@ the rest of the package raises plain messages"""
 import textwrap
 import re
 import unicodedata
+import os
 
 
 PREFIX = "[mi-race]"
-WIDTH = 79                  # every line stays under 80 columns
+WIDTH = 79                                  # every line stays under 80 columns
 INDENT = " " * (len(PREFIX) + 1)
+HIGHLIGHT = "\033[1;31m"                    # bold red, for warnings and errors
+RESET = "\033[0m"                           # back to normal text
+ANSI = re.compile(r"\033\[[0-9;]*m")        # a colour code: it takes no columns on the screen
 
 
 def _message(head: str, text: str) -> str:
@@ -26,19 +30,37 @@ def info(text: str) -> str:
     return _message(f"{PREFIX} ", text)
 
 
-def warning(text: str) -> str:
-    """'[mi-race] warning: text'"""
-    return _message(f"{PREFIX} warning: ", text)
+def use_color(stream) -> bool:
+    """colour only on a terminal, and never when the NO_COLOR environment variable is set (no-color.org);
+    a file or a pipe gets plain text"""
+    try:
+        terminal = stream.isatty()
+    except (AttributeError, ValueError, OSError):       # no isatty, or a closed stream
+        terminal = False
+    return terminal and not os.environ.get("NO_COLOR")
 
 
-def error(text: str) -> str:
-    """'[mi-race] error: text'"""
-    return _message(f"{PREFIX} error: ", text)
+def _highlight(text: str, color: bool) -> str:
+    """text in bold red, line by line, if color"""
+    if not color:
+        return text
+    return "\n".join(f"{HIGHLIGHT}{line}{RESET}" for line in text.split("\n"))
+
+
+def warning(text: str, color: bool = False) -> str:
+    """'[mi-race] warning: text', in bold red if color"""
+    return _highlight(_message(f"{PREFIX} warning: ", text), color)
+
+
+def error(text: str, color: bool = False) -> str:
+    """'[mi-race] error: text', in bold red if color"""
+    return _highlight(_message(f"{PREFIX} error: ", text), color)
 
 
 def display_width(text: str) -> int:
-    """the columns a text takes in a terminal: a wide East Asian character takes 2, every other character 1"""
-    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in text)
+    """the columns a text takes in a terminal: a wide East Asian character takes 2, a colour code 0,
+    every other character 1"""
+    return sum(2 if unicodedata.east_asian_width(char) in "WF" else 1 for char in ANSI.sub("", text))
 
 
 def _fit(line: str, width: int) -> list[str]:
