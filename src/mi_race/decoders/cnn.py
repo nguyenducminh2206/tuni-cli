@@ -34,10 +34,10 @@ class GlobalScaler:
 
 
 def train_cnn(X: np.ndarray, y:np.ndarray, settings: CNNConfig,
-              rng: np.random.Generator) -> NetworkDecoder:
+              rng: np.random.Generator, progress=None) -> NetworkDecoder:
     """the CNN decoder: all rx values scaled together, then conv layers along the signal"""
     scaler = GlobalScaler().fit(X)                  # 1 mean and spread of all values, from these runs only
     torch.manual_seed(int(rng.integers(2**32)))     # the starting weights come from our stream
     network = make_cnn(X.shape[1], settings.channels, settings.kernel_size, n_symbols=int(y.max()) + 1) 
-    losses = train_network(network, scaler.transform(X), y, settings, rng)
+    losses = train_network(network, scaler.transform(X), y, settings, rng, progress)
     return NetworkDecoder(scaler, network, losses)       

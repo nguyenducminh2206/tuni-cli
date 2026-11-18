@@ -8,13 +8,17 @@ from mi_race.config import Config
 from mi_race.streams import random_stream
 
 
-def simulate_dataset(cfg: Config) -> np.ndarray:
-    """every run of every symbol, one row per run: symbol, rx_0, ... , rx_m"""
+def simulate_dataset(cfg: Config, progress=None) -> np.ndarray:
+    """every run of every symbol, one row per run: symbol, rx_0, ... , rx_m
+    progress (optional) is called after each run with (done, total, stats, detail)"""
     rows = []
+    total = len(cfg.encoder.symbols) * cfg.data.runs_per_symbol
     for u, vector in enumerate(cfg.encoder.symbols):
         for r in range(cfg.data.runs_per_symbol):
             rx = transmit(vector, cfg, random_stream(cfg.seed, "simulation", u, r))
             rows.append([u, *rx])
+            if progress:
+                progress(len(rows), total, "", f"symbol {u} · run {r + 1} of {cfg.data.runs_per_symbol}")
     return np.array(rows)
 
 def write_dataset(path: str | Path, rows: np.ndarray) -> None:

@@ -101,17 +101,20 @@ def propose_move(symbols, rng: np.random.Generator, chunk: int=CHUNK):
 
 
 def search(base_config: Config, start, steps: int, run: int=0, score: Callable = score_codebook,
-           chunk: int=CHUNK, threshold: float=THRESHOLD):
+           chunk: int=CHUNK, threshold: float=THRESHOLD, progress=None):
     """hill climbing over codebooks: each step propose a legal move, scores the parent and the candidate on
     the same new dataset, and keeps the candidate only if its BA bound is higher by more then 'threshold'
     'run' picks the random streams (moves and datasets), do 2 runs are 2 independent searches.
-    return the final codebook and the history, one dict per step"""
+    return the final codebook and the history, one dict per step.
+    progress (optional) is called after each step with (done, total, stats, detail)"""
     rng = random_stream(base_config.seed, "search_moves", run)
     current = tuple(tuple(v) for v in start)
     history = []
     for step in range(steps):
         proposal = propose_move(current, rng, chunk)
         if proposal is None:                            # no legal move left
+            if progress:
+                progress(step, step, f"{sum(row['accepted'] for row in history)} kept · no legal move left")
             break
         move, candidate = proposal
         seed = dataset_seed(base_config.seed, "search_data", run, step)         # a new dataset, the same for both
@@ -123,6 +126,10 @@ def search(base_config: Config, start, steps: int, run: int=0, score: Callable =
         history.append({"step": step, "seed": seed, "move": move, "parent_bits": parent_bits,
                         "candidate_bits": candidate_bits, "difference": candidate_bits - parent_bits,
                         "accepted": accepted, "codebook": current})
+        if progress:
+            kept = sum(row["accepted"] for row in history)
+            progress(step + 1, steps, f"{kept} kept · score {candidate_bits if accepted else parent_bits:.3f}",
+                     f"last move {candidate_bits - parent_bits:+.3f} bits · {'kept' if accepted else 'not kept'}")
     return current, history
 
 
@@ -138,10 +145,11 @@ def check_codebook(base_config: Config, symbols, n_checks: int=CHECKS, score: Ca
 
 
 def learning_curve(base_config: Config, start, history: list, every: int=10, n_checks:int=CHECKS,
-                   score: Callable=score_codebook) -> list:
+                   score: Callable=score_codebook, progress=None) -> list:
     """check the start codebook and the codebook after every 'every' steps of a search history (and after the last step)
     all on the same check datasets. A codebook that was already checked is not checked again
-    return 1 dict per point: the steps done, the moves accepted so far, and the check (bits, mean, sd)"""
+    return 1 dict per point: the steps done, the moves accepted so far, and the check (bits, mean, sd).
+    progress (optional) is called after each point with (done, total, stats)"""
     if every < 1:
         raise ValueError(f"every must be at least 1, got {every}")
     codebooks = [start] + [row["codebook"] for row in history]      # codebooks[k]: the codebook after k steps
@@ -156,6 +164,8 @@ def learning_curve(base_config: Config, start, history: list, every: int=10, n_c
             checks[codebook] = check_codebook(base_config, codebook, n_checks, score)
         accepted = sum(row["accepted"] for row in history[:k])
         curve.append({"steps": k, "accepted": accepted, **checks[codebook]})
+        if progress:
+            progress(len(curve), len(points), f"after {k} steps · {checks[codebook]['mean']:.3f} bits")
     return curve
 
 

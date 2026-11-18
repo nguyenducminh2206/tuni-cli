@@ -40,7 +40,7 @@ class RescaledDecoder:
         return rescale(self.decoder.predict_proba(X), self.temperature)
 
 def train_rescaled(train_decoder: Callable, X: np.ndarray, y: np.ndarray, settings, rng: np.random.Generator,
-                   held_out: float=HELD_OUT) -> RescaledDecoder:
+                   held_out: float=HELD_OUT, progress=None) -> RescaledDecoder:
     """hold back a share of each symbol's training runs, train the decoder on the rest,
     fit the temperature on the held-back runs, and return the 2 together.
     the random stream picks the held-back runs first, then trains the decoder"""
@@ -49,6 +49,6 @@ def train_rescaled(train_decoder: Callable, X: np.ndarray, y: np.ndarray, settin
     numbered = np.column_stack([y, np.arange(len(y))])          # symbol, row number: split the row numbers
     fit_rows, held_rows = split_dataset(numbered, held_out, rng)
     fit, held = fit_rows[:, 1], held_rows[:, 1]
-    decoder = train_decoder(X[fit], y[fit], settings, rng)
+    decoder = train_decoder(X[fit], y[fit], settings, rng, **({"progress": progress} if progress else {}))
     temperature = fit_temperature(decoder.predict_proba(X[held]), y[held])
     return RescaledDecoder(decoder, temperature)
