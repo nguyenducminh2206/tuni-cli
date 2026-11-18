@@ -8,18 +8,39 @@ class SymbolError(ValueError):
     """a typed release vector breaks a rule (the prompt shows the message and asks again)"""
 
 
+def parse_pairs(parts: list[str], n_slots: int) -> tuple[int, ...]:
+    """'amount:slot' pairs -> a release vector; slots not named release nothing.
+    For ex, with n_slots=4: ["25:1", "25:2"] -> (0, 25, 25, 0)"""
+    vector = [0] * n_slots
+    named = set()
+    for part in parts:
+        amount, colon, slot = part.partition(":")
+        if not (colon and amount.isdecimal() and slot.isdecimal()):
+            raise SymbolError(f"{part!r} is not amount:slot, e.g. 50:3 for 50 molecules at slot 3")
+        if int(slot) >= n_slots:
+            raise SymbolError(f"there is no slot {int(slot)}: the slots are 0 ... {n_slots - 1}")
+        if int(slot) in named:
+            raise SymbolError(f"slot {int(slot)} is named twice")
+        named.add(int(slot))
+        vector[int(slot)] = int(amount)
+    return tuple(vector)
+
+
 def parse_vector(line: str, n_slots: int, budget: int) -> tuple[int, ...]:
-    """turn one typed line into a release vector, or SymbolError
-    numbers are separated by spaces or commas. For ex, with n_slots=4 and budget=50:
-    "50 0 0 0" -> (50, 0, 0, 0)
+    """turn one typed line into a release vector, or SymbolError. Two ways to type it, with n_slots=4, budget=50:
+    amount:slot pairs, only where molecules go: "50:0" -> (50, 0, 0, 0), "25:1 25:2" -> (0, 25, 25, 0)
+    or one number per slot, separated by spaces or commas: "50 0 0 0" -> (50, 0, 0, 0)
     """
     parts = line.replace(",", " ").split()
-    if len(parts) != n_slots:
-        raise SymbolError(f"expected {n_slots} numbers (one per slot), got {len(parts)!r}")
-    for part in parts:
-        if not part.isdecimal():
-            raise SymbolError(f"{part!r} is not a valid amount: use a whole number, 0 or more")
-    vector = tuple(int(part) for part in parts)
+    if any(":" in part for part in parts):
+        vector = parse_pairs(parts, n_slots)
+    else:
+        if len(parts) != n_slots:
+            raise SymbolError(f"expected {n_slots} numbers (one per slot), got {len(parts)!r}")
+        for part in parts:
+            if not part.isdecimal():
+                raise SymbolError(f"{part!r} is not a valid amount: use a whole number, 0 or more")
+        vector = tuple(int(part) for part in parts)
     if sum(vector) != budget:
         raise SymbolError(f"the molecules add up to {sum(vector)!r}, but the budget is {budget!r}")
     return vector

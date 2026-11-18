@@ -20,7 +20,7 @@ from pathlib import Path
 from mi_race import __version__, ui
 from mi_race.config import Config, ConfigError, load_config, parse_config, write_config_file
 from mi_race.dataset import DatasetError
-from mi_race.symbols import SymbolError
+from mi_race.symbols import SymbolError, ask_symbols, write_symbols
 
 DECODER_NAMES = {"random_forest": "random forest", "mlp": "MLP", "cnn": "CNN"}
 
@@ -46,12 +46,16 @@ def describe(cfg: Config) -> str:
     ], color())
 
 
-def describe_symbols(cfg: Config) -> str:
-    """each symbol's releases: '50 at 0.3 s', or several for a split burst"""
+def describe_symbols(cfg: Config, symbols=None, typed: bool = False) -> str:
+    """each symbol's releases: '50 at 0.3 s', or several for a split burst (the config's own symbols,
+    or others for the same slots). typed: first the symbol as it is typed, amount:slot ('50:3')"""
     encoder = cfg.encoder
-    return ui.facts([(f"symbol {u}", " · ".join(f"{amount} at {k * encoder.slot_dt:g} s"
-                                                for k, amount in enumerate(vector) if amount))
-                     for u, vector in enumerate(encoder.symbols)], color())
+    symbols = encoder.symbols if symbols is None else symbols
+    pairs = [" ".join(f"{amount}:{k}" for k, amount in enumerate(vector) if amount) for vector in symbols]
+    width = max(len(text) for text in pairs)
+    return ui.facts([(f"symbol {u}", (ui.paint(pairs[u].ljust(width), ui.BOLD, color()) + "  " if typed else "")
+                      + " · ".join(f"{amount} at {k * encoder.slot_dt:g} s" for k, amount in enumerate(vector) if amount))
+                     for u, vector in enumerate(symbols)], color())
 
 
 def template() -> dict:
@@ -153,6 +157,53 @@ def run_edit(args) -> int:
     return 0
 
 
+def run_symbols(args) -> int:
+    """mi-race symbols CONFIG: type a new codebook, one release vector per symbol, checked as it is typed;
+    the config is only changed after a yes, and only if the whole config is still valid"""
+    path = Path(args.config)
+    print(ui.heading("symbols", str(path), color()))
+    print()
+    cfg = load_config(path)
+    if not interactive():
+        raise OSError("symbols needs a terminal to type the symbols in")
+    encoder = cfg.encoder
+    count = args.count or encoder.n_symbols
+    if count < 2:
+        raise ConfigError(f"a codebook needs at least 2 symbols, got {count}")
+    print(ui.section("current codebook", f"{encoder.n_symbols} symbols · budget {encoder.budget}",
+                     describe_symbols(cfg, typed=True), color()))
+    print()
+    last = encoder.n_slots - 1
+    print(ui.facts([("type", f"amount:slot adding up to {encoder.budget} · e.g. {encoder.budget}:3 · "
+                             f"{encoder.budget // 2}:3 {encoder.budget - encoder.budget // 2}:4 splits a burst"),
+                    ("slots", f"0 … {last} · slot k releases at k × {encoder.slot_dt:g} s "
+                              f"(slot {last} at {last * encoder.slot_dt:g} s)")], color()))
+    print()
+
+    def read(prompt: str) -> str:
+        try:
+            return input(f"{ui.INDENT}{prompt.rstrip(': ')} › ")
+        except EOFError:                                            # Ctrl-D: stop, nothing is written
+            raise KeyboardInterrupt from None
+
+    def show(text: str) -> None:                                    # ask_symbols shows its rules, then any mistake
+        if text.startswith(" "):
+            complain(text.strip())
+
+    symbols = ask_symbols(count, encoder.n_slots, encoder.budget, ask=read, show=show)
+    print()
+    print(ui.section("new codebook", f"{count} symbols · budget {encoder.budget}",
+                     describe_symbols(cfg, symbols, typed=True), color()))
+    print()
+    if not ui.ask(f"Write these symbols to {path}?"):
+        print(ui.info(f"nothing written · {path} is unchanged", color()))
+        return 0
+    write_symbols(path, symbols)
+    print()
+    print(ui.done("symbols written", f"{count} symbols", str(path), color=color()))
+    return 0
+
+
 def run_check(args) -> int:
     """mi-race check CONFIG: every rule of the config, then what it sets up"""
     print(ui.heading("check", args.config, color()))
@@ -189,6 +240,11 @@ def build_parser() -> Parser:
     edit = commands.add_parser("edit", help="open a config in the editor (nano, or $EDITOR), then check it")
     edit.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
     edit.set_defaults(run=run_edit)
+
+    symbols = commands.add_parser("symbols", help="type a new codebook into a config, symbol by symbol")
+    symbols.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
+    symbols.add_argument("--count", type=int, help="how many symbols (default: as many as the config has)")
+    symbols.set_defaults(run=run_symbols)
 
     check = commands.add_parser("check", help="check a config against every rule and show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")
