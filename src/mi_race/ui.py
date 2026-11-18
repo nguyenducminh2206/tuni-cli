@@ -4,7 +4,7 @@
   (bold green: a correct guess; red: a warning or an error);
 - ' · ' between facts, a faint rule under every title;
 - a sign for every kind of line: ✓ done, ! warning, ✗ error, ? a question;
-- a bold [mi-race] starts the tool's own messages, questions and headings.
+- a bold cyan [mi-race] starts the tool's own messages, questions and headings; the banner is grey.
 The prefix is added here and nowhere else; the rest of the package raises plain messages.
 Styles are only used on a terminal (color=True): a file or a pipe gets plain text."""
 
@@ -21,12 +21,18 @@ PREFIX = "[mi-race]"
 WIDTH = 79                                  # every line stays under 80 columns
 INDENT = "  "                               # every element starts 2 columns in
 TEXT_INDENT = " " * len(INDENT + PREFIX + " ")        # where a message's text starts
-RULE = 58                                   # the width of the rule under a title
+RULE = WIDTH - len(INDENT)                  # the width of the rule under a title
+DESCRIPTION = ("molecular communication through a diffusion channel: exact simulation, learned decoders, "
+               "and a search for the most informative symbols")
 
 BOLD = "\033[1m"
 DIM = "\033[2m"                             # faint, for what is secondary
 RED = "\033[31m"                            # a warning or an error
 CORRECT = "\033[1;32m"                      # bold green: a correct guess
+GRAY = "\033[90m"                           # grey: the banner, the version and the config under it
+SOFT = "\033[37m"                           # light grey, normal weight: the description under the banner
+ART = GRAY                                  # the large MI-RACE banner
+BRAND = "\033[1;36m"                        # cyan, not bold: the [mi-race] prefix
 RESET = "\033[0m"                           # back to normal text
 ANSI = re.compile(r"\033\[[0-9;]*m")        # a style code: it takes no columns on the screen
 
@@ -88,7 +94,7 @@ def _message(label: str, text: str, style: str, color: bool) -> str:
     """'  [mi-race] label · text': the label (sign and word) in bold, the text in style"""
     head = INDENT + PREFIX + " " + (label + " · " if label else "")
     lines = _wrap(head, text)
-    first = INDENT + paint(PREFIX, BOLD, color) + " "
+    first = INDENT + paint(PREFIX, BRAND, color) + " "
     first += (paint(label, BOLD + style, color) + paint(" · " + lines[0][len(head):], style, color)) if label \
         else lines[0][len(head):]
     return "\n".join([first] + [TEXT_INDENT + paint(line[len(TEXT_INDENT):], style, color) for line in lines[1:]])
@@ -114,7 +120,7 @@ def question(text: str, yes: bool = True, color: bool = False) -> str:
     Only the prompt: asking and reading the answer come with the questions part (7f)"""
     choice = "[Y/n]" if yes else "[y/N]"
     lines = _wrap(INDENT + PREFIX + " ? ", f"{text} {choice}")
-    lines[0] = INDENT + paint(PREFIX, BOLD, color) + " " + paint("?", BOLD, color) + lines[0][len(INDENT + PREFIX + " ?"):]
+    lines[0] = INDENT + paint(PREFIX, BRAND, color) + " " + paint("?", BOLD, color) + lines[0][len(INDENT + PREFIX + " ?"):]
     lines[-1] = lines[-1][:-len(choice)] + paint(choice, DIM, color)
     return "\n".join(lines) + " "
 
@@ -127,8 +133,9 @@ def done(what: str, *facts: str, color: bool = False) -> str:
 # --- 7b: headings, sections and facts ------------------------------------------------------------
 
 def heading(title: str, subtitle: str = "", color: bool = False) -> str:
-    """the start of a command or stage: '[mi-race] / title', a faint rule, and a faint subtitle"""
-    lines = [INDENT + paint(PREFIX, BOLD, color) + " / " + title, INDENT + paint("─" * RULE, DIM, color)]
+    """the start of a command or stage: '[mi-race] / title' with the title in bold, a faint rule,
+    and a faint subtitle"""
+    lines = [INDENT + paint(PREFIX, BRAND, color) + " / " + paint(title, BOLD, color), INDENT + paint("─" * RULE, DIM, color)]
     return "\n".join(lines + ([INDENT + paint(subtitle, DIM, color)] if subtitle else []))
 
 
@@ -189,10 +196,21 @@ BANNER = """\
 
 
 def banner(config: str | None = None, version: str = __version__, color: bool = False) -> str:
-    """the MI-RACE art, then '[mi-race] version · config'; the CLI prints it only on a terminal"""
-    art = [INDENT + line for line in BANNER.split("\n")]
-    line = INDENT + paint(PREFIX, BOLD, color) + " " + paint(" · ".join([version] + ([config] if config else [])), DIM, color)
-    return "\n".join(art + [line])
+    """the MI-RACE art in grey, then '[mi-race] version · config' (the prefix cyan, the rest grey) and what
+    the tool does; the CLI prints it only on a terminal"""
+    art = [INDENT + paint(line, ART, color) for line in BANNER.split("\n")]
+    line = (
+        INDENT
+        + paint(PREFIX, BRAND, color)
+        + " "
+        + paint(
+            " · ".join([version] + ([config] if config else [])),
+            GRAY,
+            color,
+        )
+    )
+    about = [INDENT + paint(line, SOFT, color) for line in textwrap.wrap(DESCRIPTION, width=WIDTH - len(INDENT))]
+    return "\n".join(art + ["", line] + about)
 
 
 # --- 7e: progress --------------------------------------------------------------------------------
