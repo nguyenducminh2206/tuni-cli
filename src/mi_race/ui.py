@@ -281,28 +281,36 @@ class Progress:
 ANSWERS = {"y": True, "yes": True, "n": False, "no": False}
 
 
-def ask(text: str, yes: bool = True, accept_defaults: bool = False, read=input, stdin=None, out=None) -> bool:
+def answer(text: str, yes: bool = True, accept_defaults: bool = False, read=input, stdin=None,
+           out=None) -> tuple[bool, str]:
     """a yes/no question, answered on the terminal: Enter takes the default (the capital letter),
     y/yes/n/no are accepted in any case, anything else asks again. Ctrl-D also takes the default.
     With accept_defaults (--yes), or without a terminal to answer on (a batch job), the default is taken
-    and written after the question, so the output shows what was decided and why"""
+    and written after the question, so the output shows what was decided and why.
+    Returns the answer and how it was given: 'typed', 'Enter', 'Ctrl-D', '--yes' or 'no terminal'"""
     stdin, out = stdin or sys.stdin, out or sys.stdout
     color = use_color(out)
     prompt = question(text, yes, color)
     if accept_defaults or not is_terminal(stdin):
-        note = f"{'yes' if yes else 'no'} · the default ({'--yes' if accept_defaults else 'no terminal'})"
+        how = "--yes" if accept_defaults else "no terminal"
+        note = f"{'yes' if yes else 'no'} · the default ({how})"
         room = WIDTH - display_width(prompt.split("\n")[-1])        # does the note fit after the question?
         out.write((prompt if len(note) <= room else prompt.rstrip() + "\n" + TEXT_INDENT) + paint(note, DIM, color) + "\n")
         out.flush()
-        return yes
+        return yes, how
     while True:
         try:
-            answer = read(prompt).strip().lower()
+            reply = read(prompt).strip().lower()
         except EOFError:                                            # Ctrl-D: the default
             out.write("\n")
-            return yes
-        if not answer:
-            return yes
-        if answer in ANSWERS:
-            return ANSWERS[answer]
+            return yes, "Ctrl-D"
+        if not reply:
+            return yes, "Enter"
+        if reply in ANSWERS:
+            return ANSWERS[reply], "typed"
         out.write(TEXT_INDENT + paint(f"answer y or n (Enter: {'yes' if yes else 'no'})", DIM, color) + "\n")
+
+
+def ask(text: str, yes: bool = True, accept_defaults: bool = False, read=input, stdin=None, out=None) -> bool:
+    """a yes/no question (see answer), when only the answer matters"""
+    return answer(text, yes, accept_defaults, read, stdin, out)[0]
