@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "seed": 12345,
+  "channel": {
+    "L": 4,
+    "h": 1.0,
+    "D": 2.0,
+    "dt": 0.01,
+    "T": 4.0
+  },
+  "encoder": {
+    "n_slots": 30,
+    "slot_dt": 0.1,
+    "budget": 100,
+    "symbols": [
+      [50, 0, 0, 0, 10, 10, 0, 0, 0, 0],
+      [0, 0, 0, 50, 0, 0, 0, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 50, 0, 0, 0],
+      [0, 0, 0, 0, 0, 0, 0, 0, 0, 50]
+    ]
+  },
+  "data": {
+    "path": "data/diff-test.csv",
+    "runs_per_symbol": 400,
+    "test_fraction": 0.2
+  },
+  "decoders": {
+    "random_forest": {
+      "n_estimators": 200
+    },
+    "mlp": {
+      "hidden_layers": [128, 128],
+      "epochs": 30,
+      "lr": 0.001,
+      "batch_size": 64
+    },
+    "cnn": {
+      "channels": [16, 32],
+      "kernel_size": 5,
+      "epochs": 30,
+      "lr": 0.001,
+      "batch_size": 64
+    }
+  },
+  "output": {
+    "dir": "outputs/diff-test"
+  },
+  "search": {
+    "decoder": "mlp",
+    "rescaled": true,
+    "chunk": 50,
+    "threshold": 0.05,
+    "steps": 100,
+    "runs": 5
+  }
+}

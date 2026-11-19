@@ -286,6 +286,63 @@ def test_the_search_runs_with_the_real_scorer():
     assert all(isinstance(row["difference"], float) for row in history)
 
 
+# 7p: a search goes on from its history
+def test_a_search_continued_from_its_history_is_the_same_as_one_long_run():
+    _, history = search(SMALL, CLOSE, steps=10, run=1, score=late_molecules)
+    assert history[9]["accepted"]                                   # the history ends with a kept move
+    assert search(SMALL, CLOSE, steps=16, run=1, score=late_molecules, history=history) == \
+        search(SMALL, CLOSE, steps=16, run=1, score=late_molecules)
+    assert len(history) == 10                                       # the history passed in is not changed
+
+
+def test_a_history_read_back_from_json_goes_on_the_same_way():
+    _, history = search(SMALL, CLOSE, steps=10, run=1, score=late_molecules)
+    saved = json.loads(json.dumps(history))                         # moves and codebooks come back as lists
+    continued = search(SMALL, CLOSE, steps=16, run=1, score=late_molecules, history=saved)
+    assert json.dumps(continued) == json.dumps(search(SMALL, CLOSE, steps=16, run=1, score=late_molecules))
+
+
+def test_the_steps_already_done_are_not_scored_again():
+    _, history = search(SMALL, CLOSE, steps=5, run=1, score=late_molecules)
+    calls = []
+    def record(base_config, symbols, seed):
+        calls.append(seed)
+        return late_molecules(base_config, symbols, seed)
+    search(SMALL, CLOSE, steps=8, run=1, score=record, history=history)
+    assert calls[0::2] == [dataset_seed(SMALL.seed, "search_data", 1, step) for step in range(5, 8)]
+
+
+def test_the_progress_counts_only_the_new_steps():
+    _, history = search(SMALL, CLOSE, steps=5, score=late_molecules)
+    calls = []
+    search(SMALL, CLOSE, steps=8, score=late_molecules, history=history,
+           progress=lambda done, total, *_: calls.append((done, total)))
+    assert calls == [(1, 3), (2, 3), (3, 3)]
+
+
+def test_a_history_as_long_as_the_steps_comes_back_unchanged():
+    final, history = search(SMALL, CLOSE, steps=5, score=late_molecules)
+    assert search(SMALL, CLOSE, steps=5, score=late_molecules, history=history) == (final, history)
+
+
+@pytest.mark.parametrize("other", [{"run": 2}, {"start": HAND_PICKED}, {"chunk": 20}, {"threshold": -1.0},
+                                   {"base_config": replace(SMALL, seed=1)}])
+def test_a_history_from_another_search_is_refused(other):
+    _, history = search(SMALL, CLOSE, steps=10, run=1, score=late_molecules)
+    assert history[9]["accepted"]                                   # another chunk shows only in a kept move
+    settings = {"base_config": SMALL, "start": CLOSE, "run": 1, "chunk": 10, "threshold": 0.02} | other
+    with pytest.raises(ValueError, match="not a step of this search"):
+        search(**settings, steps=12, score=late_molecules, history=history)
+
+
+def test_an_edited_history_is_refused():
+    _, history = search(SMALL, CLOSE, steps=5, run=1, score=late_molecules)
+    edited = [dict(row) for row in history]
+    edited[2]["accepted"] = not edited[2]["accepted"]
+    with pytest.raises(ValueError, match="step 3 of the history"):
+        search(SMALL, CLOSE, steps=8, run=1, score=late_molecules, history=edited)
+
+
 # 8e part 1: development checks
 CHECK_SEEDS = [dataset_seed(SMALL.seed, "check_data", i) for i in range(5)]
 

@@ -101,20 +101,33 @@ def propose_move(symbols, rng: np.random.Generator, chunk: int=CHUNK):
 
 
 def search(base_config: Config, start, steps: int, run: int=0, score: Callable = score_codebook,
-           chunk: int=CHUNK, threshold: float=THRESHOLD, progress=None):
+           chunk: int=CHUNK, threshold: float=THRESHOLD, progress=None, history=()):
     """hill climbing over codebooks: each step propose a legal move, scores the parent and the candidate on
     the same new dataset, and keeps the candidate only if its BA bound is higher by more then 'threshold'
     'run' picks the random streams (moves and datasets), do 2 runs are 2 independent searches.
     return the final codebook and the history, one dict per step.
-    progress (optional) is called after each step with (done, total, stats, detail)"""
+    history (optional): the history of an earlier search with the same start, run and settings. The search
+    goes on from where it ended, up to 'steps' steps in all, exactly as if it had never stopped: the moves
+    already made are drawn again from the random stream, without scoring, and must be the ones in the history.
+    progress (optional) is called after each new step with (done, total, stats, detail), counting new steps only"""
     rng = random_stream(base_config.seed, "search_moves", run)
     current = tuple(tuple(v) for v in start)
-    history = []
-    for step in range(steps):
+    history = list(history)
+    for step, row in enumerate(history):                # the steps already done: the same draws, not scored
+        move, candidate = propose_move(current, rng, chunk) or (None, None)
+        current = candidate if row["accepted"] else current
+        made = (row["step"], row["seed"], tuple(row["move"]), row["difference"] > threshold,
+                tuple(tuple(v) for v in row["codebook"]))
+        if made != (step, dataset_seed(base_config.seed, "search_data", run, step), move, row["accepted"], current):
+            raise ValueError(f"step {step + 1} of the history is not a step of this search: "
+                             "it comes from another start, run, chunk, threshold or seed")
+    first = len(history)                                # the first new step
+    for step in range(first, steps):
         proposal = propose_move(current, rng, chunk)
         if proposal is None:                            # no legal move left
             if progress:
-                progress(step, step, f"{sum(row['accepted'] for row in history)} kept · no legal move left")
+                kept = sum(row["accepted"] for row in history)
+                progress(step - first, step - first, f"{kept} kept · no legal move left")
             break
         move, candidate = proposal
         seed = dataset_seed(base_config.seed, "search_data", run, step)         # a new dataset, the same for both
@@ -128,7 +141,8 @@ def search(base_config: Config, start, steps: int, run: int=0, score: Callable =
                         "accepted": accepted, "codebook": current})
         if progress:
             kept = sum(row["accepted"] for row in history)
-            progress(step + 1, steps, f"{kept} kept · score {candidate_bits if accepted else parent_bits:.3f}",
+            progress(step + 1 - first, steps - first,
+                     f"{kept} kept · score {candidate_bits if accepted else parent_bits:.3f}",
                      f"last move {candidate_bits - parent_bits:+.3f} bits · {'kept' if accepted else 'not kept'}")
     return current, history
 
