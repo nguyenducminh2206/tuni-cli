@@ -127,8 +127,10 @@ def question(text: str, yes: bool = True, color: bool = False) -> str:
 
 def value_prompt(label: str, text: str, default: str, width: int = 0, color: bool = False) -> str:
     """the prompt of a value question, set out like a fact: '  label  text [default] › '.
-    The label is faint and padded to width, so the questions of a section line up; Enter keeps the default"""
-    return f"{INDENT}{paint(label.ljust(width), DIM, color)}  {text} {paint(f'[{default}]', DIM, color)} › "
+    The label is faint and padded to width, so the questions of a section line up; Enter keeps the default.
+    Without text: '  label  [default] › '"""
+    return f"{INDENT}{paint(label.ljust(width), DIM, color)}  {text + ' ' if text else ''}" \
+           f"{paint(f'[{default}]', DIM, color)} › "
 
 
 def done(what: str, *facts: str, color: bool = False) -> str:

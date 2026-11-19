@@ -49,7 +49,7 @@
     "decoder": "mlp",
     "rescaled": true,
     "chunk": 50,
-    "threshold": 0.05,
+    "threshold": 0.04,
     "steps": 100,
     "runs": 5
   }

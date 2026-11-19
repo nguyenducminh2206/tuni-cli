@@ -35,7 +35,7 @@ from mi_race.decoders.rescaling import train_rescaled
 from mi_race.metrics import evaluate
 from mi_race.search import TRAINERS, FOLDS, score_codebook, search
 from mi_race.streams import random_stream
-from mi_race.symbols import SymbolError, ask_symbols, write_symbols
+from mi_race.symbols import SymbolError, ask_symbols, parse_vector, write_symbols
 
 DECODER_NAMES = {"random_forest": "random forest", "mlp": "MLP", "cnn": "CNN"}
 UNITS = {"random_forest": "trees", "mlp": "epochs", "cnn": "epochs"}       # what a decoder's progress counts
@@ -109,8 +109,9 @@ def editor() -> list[str]:
 
 
 def edit_until_valid(path: Path) -> Config | None:
-    """open the config in the editor, and check it when the editor closes;
-    a broken config can be opened again to fix it. Returns the valid config, or None"""
+    """open the config in the editor, and check it when the editor closes. If only the symbols broke
+    (n_slots or the budget changed), the codebook fitted to them is offered (fit_after_edit); otherwise a
+    broken config can be opened again to fix it. Returns the valid config, or None"""
     while True:
         command = editor()
         print(ui.info(f"opening {path} in {Path(command[0]).name} · save and close it to come back", color()))
@@ -121,6 +122,9 @@ def edit_until_valid(path: Path) -> Config | None:
         except ConfigError as problem:
             complain(str(problem))
             print()
+            fitted = fit_after_edit(path, str(problem))
+            if fitted is not None:
+                return fitted
             if not ui.ask("Open it again to fix it?"):
                 return None
             print()
@@ -137,10 +141,16 @@ QUESTIONS = [                               # what 'new' asks, in this order: (s
     ("encoder", "n_slots", "release slots"),
     ("encoder", "slot_dt", "time between slots · s"),
     ("encoder", "budget", "molecules per symbol"),
+    ("encoder", "symbols", "how many different symbols"),    # a count; then the codebook step (ask_codebook)
     ("data", "runs_per_symbol", "simulated runs per symbol"),
 ]
+SEARCH_QUESTIONS = [                        # what 'search' asks before it starts
+    ("search", "runs", "runs, each from the start codebook"),
+    ("search", "steps", "steps per run · more while a run still improves"),
+    ("search", "chunk", "molecules a move carries · at most the budget"),
+]
 SECTION_NOTES = {"channel": "where the molecules diffuse", "encoder": "when a symbol releases its molecules",
-                 "data": "the simulated dataset"}
+                 "data": "the simulated dataset", "search": "how the codebook is searched"}
 
 
 def typed_value(text: str, default):
@@ -179,64 +189,104 @@ def fit_timing(raw: dict) -> str:
             "before T")
 
 
+def fit_unasked(raw: dict, key: str) -> list[str]:
+    """settings 'new' does not ask about, lowered where the answer to key leaves them out of bounds:
+    search.chunk to a smaller budget (a search move carries at most the budget), and the CNN's kernel_size
+    to the values per run after T or dt. Returns what changed"""
+    notes, channel, encoder = [], raw["channel"], raw["encoder"]
+    search, cnn = raw.get("search", {}), raw.get("decoders", {}).get("cnn")
+    budget, chunk = encoder["budget"], search.get("chunk")
+    if key == "budget" and type(budget) is int and type(chunk) is int and 1 <= budget < chunk:
+        search["chunk"] = budget
+        notes.append(f"search.chunk lowered to {budget}: a move carries at most the budget")
+    T, dt = channel["T"], channel["dt"]
+    if key in ("T", "dt") and isinstance(cnn, dict) and is_number(T, dt) and T > 0 and dt > 0 \
+            and type(cnn.get("kernel_size")) is int:
+        n_values = round(T / dt) + 1                                # rx_0 ... rx_M
+        kernel = n_values if n_values % 2 else n_values - 1         # the kernel must be odd
+        if cnn["kernel_size"] > n_values >= 2:
+            cnn["kernel_size"] = kernel
+            notes.append(f"decoders.cnn.kernel_size lowered to {kernel}: at most the {n_values} values per run")
+    return notes
+
+
 def spread_codebook(n_symbols: int, n_slots: int, budget: int) -> list[list[int]]:
     """a codebook for any slots and budget: one burst per symbol, spread evenly from the first slot to the
     last (4 symbols on 10 slots: slots 0, 3, 6 and 9, as in the example). With fewer slots than symbols,
     the budget is split between the first slot and the last, in even steps"""
+    if n_slots < 2:
+        raise ConfigError("with 1 slot every symbol is the same: use 2 slots or more")
+    if n_slots < n_symbols and budget < n_symbols - 1:
+        raise ConfigError(f"{n_symbols} symbols are too many to spread over {n_slots} slots with a budget of "
+                          f"{budget}: use at most {max(n_slots, budget + 1)} symbols, more slots or a larger budget")
     codebook = [[0] * n_slots for _ in range(n_symbols)]
-    if n_slots >= n_symbols:
-        for u in range(n_symbols):                      # u × (n_slots - 1) / (n_symbols - 1), rounded half up
+    for u in range(n_symbols):
+        if n_slots >= n_symbols:                        # u × (n_slots - 1) / (n_symbols - 1), rounded half up
             codebook[u][(2 * u * (n_slots - 1) + n_symbols - 1) // (2 * (n_symbols - 1))] = budget
-    elif n_slots >= 2 and budget >= n_symbols - 1:
-        for u in range(n_symbols):
+        else:
             late = (2 * u * budget + n_symbols - 1) // (2 * (n_symbols - 1))
             codebook[u][0], codebook[u][-1] = budget - late, late
-    else:
-        raise ConfigError(f"{n_slots} slot{'s' if n_slots > 1 else ''} with a budget of {budget} can't make "
-                          f"{n_symbols} different symbols: use more slots or a larger budget")
     return codebook
 
 
-def fit_codebook(raw: dict) -> str:
-    """a codebook spread over the slots (spread_codebook) if the symbols no longer fit n_slots or the budget.
-    Returns what changed, or ''"""
+def spread_note(n_symbols: int, n_slots: int) -> str:
+    """how spread_codebook made a codebook, for the note above it"""
+    return "a burst each, spread over the slots" if n_slots >= n_symbols else "split between the first and last slot"
+
+
+def fit_codebook(raw: dict) -> None:
+    """spread the codebook over the slots (spread_codebook) if the symbols no longer fit n_slots or the
+    budget. Nothing is said here: the codebook step shows the codebook after the encoder questions"""
     encoder = raw["encoder"]
     n_slots, budget, symbols = encoder["n_slots"], encoder["budget"], encoder["symbols"]
     if not (type(n_slots) is int and type(budget) is int and n_slots >= 1 and budget >= 1):
-        return ""                                       # the config's checks name the value
-    if all(len(vector) == n_slots and sum(vector) == budget for vector in symbols):
-        return ""
-    encoder["symbols"] = spread_codebook(len(symbols), n_slots, budget)
-    return f"codebook spread over the slots: {codebook_text(encoder['symbols'])}"
+        return                                          # the config's checks name the value
+    if any(len(vector) != n_slots or sum(vector) != budget for vector in symbols):
+        encoder["symbols"] = spread_codebook(len(symbols), n_slots, budget)
 
 
 def try_answer(raw: dict, section: str, key: str, value) -> tuple[dict, Config, list[str], list[str]]:
-    """the config with one answer in it, slot_dt and the codebook fitted to it where needed, and checked by
-    every rule. The config was valid before, so a broken rule is the answer's: ConfigError.
+    """the config with one answer in it, slot_dt, the settings not asked about (fit_unasked) and the
+    codebook fitted to it where needed, and checked by every rule. The config was valid before, so a broken
+    rule is the answer's: ConfigError. The answer to 'symbols' is a count: a new count gets a new codebook,
+    spread over the slots.
     Returns the new raw config, the checked one, what was fitted, and any warnings"""
     candidate = copy.deepcopy(raw)
-    candidate[section][key] = value
-    notes = [fit_timing(candidate) if key != "slot_dt" else "", fit_codebook(candidate)]
+    encoder = candidate["encoder"]
+    if key == "symbols":
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ConfigError(f"the number of symbols must be a whole number, got {value!r}")
+        if value < 2:
+            raise ConfigError(f"a codebook needs at least 2 symbols, got {value}")
+        if value != len(encoder["symbols"]):
+            encoder["symbols"] = spread_codebook(value, encoder["n_slots"], encoder["budget"])
+    else:
+        candidate.setdefault(section, {})[key] = value          # 'search' may be left out of a config
+    notes = [fit_timing(candidate) if key != "slot_dt" else "", *fit_unasked(candidate, key)]
+    fit_codebook(candidate)
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         cfg = parse_config(candidate)
     return candidate, cfg, [note for note in notes if note], [str(warning.message) for warning in caught]
 
 
-def ask_values(raw: dict) -> tuple[dict, Config]:
-    """the questions of a new config, one setting at a time (QUESTIONS). Enter keeps the value in brackets;
-    a typed value is checked at once with every rule of the config, and asked again, with the reason, if it
-    breaks one. Returns the answered raw config and the checked one"""
-    cfg = parse_config(raw)
-    current, shown = None, set()
-    for section, key, meaning in QUESTIONS:
+def ask_values(raw: dict, questions: list = QUESTIONS) -> tuple[dict, Config]:
+    """questions about a config, one setting at a time: those of a new config (QUESTIONS), or of the search
+    (SEARCH_QUESTIONS). Enter keeps the value in brackets; a typed value is checked at once with every rule
+    of the config, and asked again, with the reason, if it breaks one. After the number of symbols comes the
+    codebook step (ask_codebook). Returns the answered raw config and the checked one"""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cfg = parse_config(raw)
+    current, shown = None, {str(warning.message) for warning in caught}    # warnings from before: not again
+    for section, key, meaning in questions:
         if section != current:
             print()
             print(ui.section(section, SECTION_NOTES[section], color=color()))
             print()
             current = section
-            width = max(len(other) for part, other, _ in QUESTIONS if part == section)    # the keys line up
-        default = raw[section][key]
+            width = max(len(other) for part, other, _ in questions if part == section)    # the keys line up
+        default = cfg.encoder.n_symbols if key == "symbols" else getattr(getattr(cfg, section), key)
         while True:
             try:
                 text = input(ui.value_prompt(key, meaning, f"{default:g}", width, color())).strip()
@@ -255,7 +305,160 @@ def ask_values(raw: dict) -> tuple[dict, Config]:
                 shown.add(message)
                 sys.stdout.flush()
                 print(ui.warning(message, ui.use_color(sys.stderr)), file=sys.stderr)
+        if key == "symbols":
+            raw, cfg = ask_codebook(raw, cfg)
     return raw, cfg
+
+
+# --- the codebook step: in 'new', and after an edit that broke the symbols ----------------------
+
+def codebook_section(cfg: Config, how: str) -> str:
+    """a proposed codebook: each symbol as it is typed (amount:slot) and when it releases, with how it
+    was made in the note"""
+    encoder = cfg.encoder
+    return ui.section("codebook", f"{encoder.n_symbols} symbols · budget {encoder.budget} · {how}",
+                      describe_symbols(cfg, typed=True), color())
+
+
+def typing_help(encoder) -> str:
+    """how a symbol is typed, and when each slot releases"""
+    last, budget = encoder.n_slots - 1, encoder.budget
+    slot = min(3, last - 1)                                         # a slot for the examples, and the next one
+    split = f" · {budget // 2}:{slot} {budget - budget // 2}:{slot + 1} splits a burst" if budget > 1 else ""
+    return ui.facts([("type", f"amount:slot adding up to {budget} · e.g. {budget}:{slot}{split}"),
+                     ("slots", f"0 … {last} · slot k releases at k × {encoder.slot_dt:g} s "
+                               f"(slot {last} at {last * encoder.slot_dt:g} s)")], color())
+
+
+def type_symbols(encoder, count: int) -> tuple:
+    """the codebook of the 'symbols' command, typed one symbol at a time as amount:slot, each line checked
+    as it is typed (ask_symbols). Ctrl-D stops, as Ctrl-C does"""
+    print(typing_help(encoder))
+    print()
+
+    def read(prompt: str) -> str:
+        try:
+            return input(f"{ui.INDENT}{prompt.rstrip(': ')} › ")
+        except EOFError:                                            # Ctrl-D: stop, nothing is written
+            raise KeyboardInterrupt from None
+
+    def show(text: str) -> None:                                    # ask_symbols shows its rules, then any mistake
+        if text.startswith(" "):
+            complain(text.strip())
+
+    return ask_symbols(count, encoder.n_slots, encoder.budget, ask=read, show=show)
+
+
+def ask_codebook(raw: dict, cfg: Config) -> tuple[dict, Config]:
+    """the codebook step of 'new': each symbol typed as amount:slot, checked as it is typed (parse_vector,
+    and no two symbols the same). Enter keeps the symbol in brackets: the example's, or one burst per symbol
+    spread over the slots once n_slots, the budget or the count changed.
+    Returns the raw config with the typed codebook in it, and the checked one"""
+    encoder = cfg.encoder
+    print()
+    print(ui.section("codebook", f"{encoder.n_symbols} symbols · budget {encoder.budget} · "
+                                 "Enter keeps the one in brackets", color=color()))
+    print()
+    print(typing_help(encoder))
+    print()
+    width = len(f"symbol {encoder.n_symbols - 1}")
+    symbols = []
+    for u, proposed in enumerate(encoder.symbols):
+        default = " ".join(f"{amount}:{k}" for k, amount in enumerate(proposed) if amount)
+        while True:
+            try:
+                text = input(ui.value_prompt(f"symbol {u}", "", default, width, color())).strip()
+            except EOFError:                                        # Ctrl-D: stop, nothing is written
+                raise KeyboardInterrupt from None
+            try:
+                vector = parse_vector(text or default, encoder.n_slots, encoder.budget)
+                if vector in symbols:
+                    raise SymbolError(f"symbol {u} is the same as symbol {symbols.index(vector)}: "
+                                      "no decoder could tell them apart")
+                break
+            except SymbolError as problem:
+                complain(str(problem))
+        symbols.append(vector)
+    raw = copy.deepcopy(raw)
+    raw["encoder"]["symbols"] = [list(vector) for vector in symbols]
+    return raw, replace(cfg, encoder=replace(encoder, symbols=tuple(symbols)))
+
+
+def scaled(vector: list[int], budget: int) -> list[int]:
+    """amounts scaled to a new budget, adding up to it exactly: each amount gets its whole part, and the
+    molecules left over go to the largest remainders (25:3 25:4, budget 60 → 30:3 30:4)"""
+    total = sum(vector)
+    amounts = [amount * budget // total for amount in vector]
+    left = budget - sum(amounts)
+    for k in sorted(range(len(vector)), key=lambda k: -(vector[k] * budget % total))[:left]:
+        amounts[k] += 1
+    return amounts
+
+
+def fitted_symbols(symbols: list, n_slots: int, budget: int) -> tuple[list, str]:
+    """a codebook fitted to new slots and a new budget, changed as little as possible: empty slots added at
+    the end (or removed, if they are empty), and amounts scaled to the budget. If that can't be done, or
+    makes two symbols the same, one burst per symbol spread over the slots. Returns the codebook and how"""
+    fitted, changes = [], []
+    for vector in symbols:
+        if any(vector[n_slots:]) or not any(vector):                # molecules in slots that go, or none at all
+            break
+        if len(vector) != n_slots:
+            changes.append("empty slots added" if len(vector) < n_slots else "empty slots removed")
+            vector = vector[:n_slots] + [0] * (n_slots - len(vector))
+        if sum(vector) != budget:
+            changes.append("amounts scaled")
+            vector = scaled(vector, budget)
+        fitted.append(vector)
+    else:
+        if len({tuple(vector) for vector in fitted}) == len(fitted):
+            return fitted, ", ".join(dict.fromkeys(changes))       # each change once, in order
+    return spread_codebook(len(symbols), n_slots, budget), spread_note(len(symbols), n_slots)
+
+
+def fit_after_edit(path: Path, shown: str) -> Config | None:
+    """after an edit that broke only the symbols (n_slots or the budget changed): the codebook fitted to
+    them (fitted_symbols), shown, and written after a yes. If fitting shows another problem, which the
+    symbols hid, that is shown too (shown is the problem already on the screen).
+    Returns the valid config, or None: another problem, or a no"""
+    try:
+        raw = read_config_file(path)
+    except ConfigError:
+        return None
+    encoder = raw.get("encoder") if isinstance(raw, dict) else None
+    if not isinstance(encoder, dict):
+        return None
+    n_slots, budget, symbols = encoder.get("n_slots"), encoder.get("budget"), encoder.get("symbols")
+
+    def whole(value, least: int) -> bool:                           # a whole number (not true or false)
+        return type(value) is int and value >= least
+
+    if not (whole(n_slots, 1) and whole(budget, 1) and isinstance(symbols, list) and len(symbols) >= 2
+            and all(isinstance(vector, list) and all(whole(a, 0) for a in vector) for vector in symbols)):
+        return None                                                 # the error on the screen names it
+    if all(len(vector) == n_slots and sum(vector) == budget for vector in symbols):
+        return None                                                 # the symbols fit: the problem is elsewhere
+    candidate = copy.deepcopy(raw)
+    try:
+        candidate["encoder"]["symbols"], how = fitted_symbols(symbols, n_slots, budget)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")                         # shown when the written config is loaded
+            cfg = parse_config(candidate)
+    except ConfigError as problem:
+        if f"{path}: {problem}" != shown:
+            complain(f"{path}: {problem}")
+            print()
+        return None
+    print(codebook_section(cfg, how))
+    print()
+    if not ui.ask(f"Write this codebook to {path}?"):
+        print()
+        return None
+    write_config_file(path, candidate)
+    print()
+    print(ui.done("codebook written", str(path), color=color()))
+    print()
+    return load_config(path)
 
 
 # --- commands ------------------------------------------------------------------------------------
@@ -342,24 +545,7 @@ def run_symbols(args) -> int:
     print(ui.section("current codebook", f"{encoder.n_symbols} symbols · budget {encoder.budget}",
                      describe_symbols(cfg, typed=True), color()))
     print()
-    last = encoder.n_slots - 1
-    print(ui.facts([("type", f"amount:slot adding up to {encoder.budget} · e.g. {encoder.budget}:3 · "
-                             f"{encoder.budget // 2}:3 {encoder.budget - encoder.budget // 2}:4 splits a burst"),
-                    ("slots", f"0 … {last} · slot k releases at k × {encoder.slot_dt:g} s "
-                              f"(slot {last} at {last * encoder.slot_dt:g} s)")], color()))
-    print()
-
-    def read(prompt: str) -> str:
-        try:
-            return input(f"{ui.INDENT}{prompt.rstrip(': ')} › ")
-        except EOFError:                                            # Ctrl-D: stop, nothing is written
-            raise KeyboardInterrupt from None
-
-    def show(text: str) -> None:                                    # ask_symbols shows its rules, then any mistake
-        if text.startswith(" "):
-            complain(text.strip())
-
-    symbols = ask_symbols(count, encoder.n_slots, encoder.budget, ask=read, show=show)
+    symbols = type_symbols(encoder, count)
     print()
     print(ui.section("new codebook", f"{count} symbols · budget {encoder.budget}",
                      describe_symbols(cfg, symbols, typed=True), color()))
@@ -696,17 +882,40 @@ def runs_table(runs: list) -> str:
     return "\n".join(lines)
 
 
+def ask_search_settings(cfg: Config, config_path: str) -> Config:
+    """step 0: the search settings (SEARCH_QUESTIONS), each checked as it is typed. Changed ones are saved
+    to the config, so it always describes the search that ran. Returns the config to search with"""
+    print(ui.info("Enter keeps the value in brackets · Ctrl-C stops without searching", color()))
+    raw, answered = ask_values(read_config_file(config_path), SEARCH_QUESTIONS)
+    print()
+    changed = [f"{key} {getattr(answered.search, key)}" for _, key, _ in SEARCH_QUESTIONS
+               if getattr(answered.search, key) != getattr(cfg.search, key)]
+    if changed:
+        write_config_file(config_path, raw)
+        print(ui.done("search settings saved", *changed, config_path, color=color()))
+        print()
+    return answered
+
+
 def run_search(args) -> int:
     """mi-race search CONFIG: the guided encoder search. The tool proposes every change, shows the evidence
     and asks yes/no; a no keeps what is there. The questions, evidence and answers go to
     output.dir/decisions.json, the runs to output.dir/search.json.
-    Step 1: the threshold, from the noise of the feedback. Step 2: the runs. Step 3: more steps for the runs still improving"""
+    Step 0: the settings, typed (at a terminal, without --yes). Step 1: the threshold, from the noise of the
+    feedback. Step 2: the runs. Step 3: more steps for the runs still improving"""
     print(ui.heading("search", args.config, color()))
     print()
     cfg = load_config(args.config)
-    settings = cfg.search
     output = Path(cfg.output.dir) / "search.json"
     log = DecisionLog(cfg.output.dir, "search", args.config, accept_defaults=args.yes)
+    if output.exists():
+        if not log.ask("replace", f"{output} already holds a search. Search again and replace it?", yes=False):
+            print(ui.info(f"nothing searched · {output} is unchanged", color()))
+            return 0
+        print()
+    if interactive() and not args.yes:
+        cfg = ask_search_settings(cfg, args.config)
+    settings = cfg.search
     start = wrap_codebook(codebook_text(cfg.encoder.symbols), ui.WIDTH - len(ui.INDENT) - len("feedback  "))
     print(ui.facts([("feedback", f"{'rescaled ' if settings.rescaled else ''}{DECODER_NAMES[settings.decoder]} · "
                                  f"BA bound on a new dataset each step · {FOLDS}-fold"),
@@ -716,11 +925,6 @@ def run_search(args) -> int:
                     ("start", start[0]), *[("", line) for line in start[1:]],
                     ("results", f"{output} · {log.path}")], color()))
     print()
-    if output.exists():
-        if not log.ask("replace", f"{output} already holds a search. Search again and replace it?", yes=False):
-            print(ui.info(f"nothing searched · {output} is unchanged", color()))
-            return 0
-        print()
     cfg, noise = set_threshold(cfg, args.config, log)
     print()
     record = {"mi_race": __version__, "created": datetime.now().isoformat(timespec="seconds"),
