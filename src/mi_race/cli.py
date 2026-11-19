@@ -26,14 +26,14 @@ from pathlib import Path
 import numpy as np
 
 from mi_race import __version__, ui
-from mi_race.compare import measure_noise
+from mi_race.compare import compare_codebooks, measure_noise, paired_gain
 from mi_race.config import Config, ConfigError, load_config, parse_config, read_config_file, write_config_file
 from mi_race.dataset import (DatasetError, check_dataset, read_dataset, simulate_dataset, split_dataset,
                              write_dataset)
 from mi_race.decisions import DecisionLog, DecisionLogError
 from mi_race.decoders.rescaling import train_rescaled
 from mi_race.metrics import evaluate
-from mi_race.search import TRAINERS, FOLDS, score_codebook, search
+from mi_race.search import CHECKS, FOLDS, TRAINERS, score_codebook, search
 from mi_race.streams import random_stream
 from mi_race.symbols import SymbolError, ask_symbols, parse_vector, write_symbols
 
@@ -882,6 +882,93 @@ def runs_table(runs: list) -> str:
     return "\n".join(lines)
 
 
+def check_table(means: dict, decoders: list) -> str:
+    """one line per codebook: its mean BA bound under each decoder, and the mean over the decoders"""
+    header = ["codebook", *[DECODER_NAMES[name] for name in decoders], "mean"]
+    rows = [[label, *[f"{means[label][name]:.3f}" for name in decoders],
+             f"{np.mean([means[label][name] for name in decoders]):.3f}"] for label in means]
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(len(header))]
+
+    def line(cells: list) -> str:                                   # the label on the left, numbers on the right
+        return "   ".join([cells[0].ljust(widths[0])] + [cell.rjust(w) for cell, w in zip(cells[1:], widths[1:])])
+
+    return "\n".join([ui.INDENT + ui.paint(line(header), ui.DIM, color())] + [ui.INDENT + line(row) for row in rows])
+
+
+def found_config(config_path: str, symbols) -> tuple[Path, dict]:
+    """the config of a found codebook: the same config with these symbols, its own data file and output
+    folder, named after the config: configs/NAME-found.json, data/NAME-found.csv, outputs/NAME-found.
+    Checked by every rule before it is returned. Returns its path and the raw config"""
+    path = Path(config_path)
+    name = f"{path.stem}-found"
+    raw = read_config_file(path)
+    raw["encoder"]["symbols"] = [list(vector) for vector in symbols]
+    raw["data"]["path"] = f"data/{name}.csv"
+    raw.setdefault("output", {})["dir"] = f"outputs/{name}"
+    parse_config(raw)
+    return path.with_name(f"{name}.json"), raw
+
+
+def check_found(cfg: Config, config_path: str, output: Path, record: dict, log: DecisionLog) -> None:
+    """step 4: the start codebook and the codebooks the runs found, under every rescaled decoder of the
+    config, on the same check datasets (check_data), so they compare dataset by dataset. The best found has
+    the highest mean over the decoders; its gain over the start is paired by dataset. Its config
+    (configs/NAME-found.json) is proposed: [Y/n] if it is better under every decoder, else [y/N].
+    The check goes to search.json"""
+    start = tuple(tuple(vector) for vector in cfg.encoder.symbols)
+    codebooks = {"start": start} | {f"run {run['run'] + 1}": tuple(tuple(v) for v in run["final"])
+                                    for run in record["runs"]}
+    found = [label for label, symbols in codebooks.items() if symbols != start]
+    if not found:
+        print(ui.info("no run moved from the start codebook · nothing to check", color()))
+        return
+    with ui.Progress("check", "codebooks checked", unit="datasets") as bar:
+        scores = compare_codebooks(cfg, codebooks, "check_data", CHECKS, rescaled=True, progress=bar)
+    decoders = list(scores["start"][0])
+    bits = {label: {name: [result[name]["ba_bound_bits"] for result in results] for name in decoders}
+            for label, results in scores.items()}
+    means = {label: {name: float(np.mean(values)) for name, values in by_decoder.items()}
+             for label, by_decoder in bits.items()}
+    best = max(found, key=lambda label: np.mean(list(means[label].values())))     # the first of any tie
+    gains = {name: paired_gain(scores, best, "start", name) for name in decoders}
+    record["check"] = {"job": "check_data", "datasets": CHECKS, "rescaled": True,
+                       "codebooks": {label: [list(v) for v in symbols] for label, symbols in codebooks.items()},
+                       "ba_bound_bits": bits, "best": best, "gains": gains}
+    write_json(output, record)
+    print()
+    print(ui.section("check", f"every rescaled decoder on {CHECKS} check datasets · BA bound in bits",
+                     check_table(means, decoders), color()))
+    print()
+    label_width = max(len("codebook"), *(len(DECODER_NAMES[name]) for name in decoders))
+    text = wrap_codebook(codebook_text(codebooks[best]), ui.WIDTH - len(ui.INDENT) - label_width - 2)
+    print(ui.section("best found", f"{best} · the highest mean over the decoders", ui.facts(
+        [("codebook", text[0]), *[("", line) for line in text[1:]]] +
+        [(DECODER_NAMES[name], f"{gain['mean']:+.3f} ± {gain['se']:.3f} bits over the start · higher on "
+                               f"{gain['higher']} of {gain['datasets']}") for name, gain in gains.items()],
+        color()), color()))
+    print()
+    worse = [DECODER_NAMES[name] for name, gain in gains.items() if gain["mean"] <= 0]
+    if worse:
+        print(ui.warning(f"{best} is not better than the start under {' and '.join(worse)}", color()))
+    else:
+        print(ui.done(f"{best} is better than the start", "under every decoder", color=color()))
+    path, raw = found_config(config_path, codebooks[best])
+    question = (f"Replace {path} with a config for it?" if path.exists() else
+                f"Write {path}, a config for it?")
+    evidence = {"datasets": CHECKS, "best": best, "symbols": [list(v) for v in codebooks[best]],
+                "gains": gains}
+    if not log.ask("found", question, evidence=evidence, proposal={"config": str(path)},
+                   yes=not worse and not path.exists()):
+        print(ui.info(f"no config written · the check is in {output}", color()))
+        return
+    write_config_file(path, raw)
+    record["found_config"] = str(path)
+    write_json(output, record)
+    print()
+    print(ui.done("found config written", str(path), color=color()))
+    print(ui.facts([("data", raw["data"]["path"]), ("output", raw["output"]["dir"])], color()))
+
+
 def ask_search_settings(cfg: Config, config_path: str) -> Config:
     """step 0: the search settings (SEARCH_QUESTIONS), each checked as it is typed. Changed ones are saved
     to the config, so it always describes the search that ran. Returns the config to search with"""
@@ -902,7 +989,8 @@ def run_search(args) -> int:
     and asks yes/no; a no keeps what is there. The questions, evidence and answers go to
     output.dir/decisions.json, the runs to output.dir/search.json.
     Step 0: the settings, typed (at a terminal, without --yes). Step 1: the threshold, from the noise of the
-    feedback. Step 2: the runs. Step 3: more steps for the runs still improving"""
+    feedback. Step 2: the runs. Step 3: more steps for the runs still improving. Step 4: the found codebooks
+    checked against the start, and the best one's config proposed"""
     print(ui.heading("search", args.config, color()))
     print()
     cfg = load_config(args.config)
@@ -934,6 +1022,8 @@ def run_search(args) -> int:
     search_runs(cfg, output, record)
     print()
     runs = more_steps(cfg, args.config, output, record, log)
+    print()
+    check_found(cfg, args.config, output, record, log)
     print()
     print(ui.done("search saved", f"{len(runs)} runs", size(output), color=color()))
     print(ui.facts([("file", str(output.resolve()))], color()))
