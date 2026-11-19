@@ -9,7 +9,7 @@ from mi_race.config import (ChannelConfig, EncoderConfig, DataConfig, ConfigErro
                             OutputConfig, Config, read_config_file, _check_keys, _whole, _positive,
                             _parse_channel, _parse_symbols, _parse_encoder, _parse_data, _parse_output,
                             _parse_decoders, parse_config, load_config, write_config_file, RandomForestConfig,
-                            MLPConfig, CNNConfig, DECODERS, DECODER_FIELDS)
+                            MLPConfig, CNNConfig, DECODERS, DECODER_FIELDS, SearchConfig, _parse_search)
 
 
 # 3a: ChannelConfig
@@ -514,3 +514,48 @@ def test_kernel_rule_uses_the_configs_own_signal(example_raw):
     example_raw["decoders"]["cnn"]["kernel_size"] = 7
     with pytest.raises(ConfigError, match="must be odd and at most 5"):
         parse_config(example_raw)
+
+# 7m: the search section
+def test_the_search_section_of_the_example_is_the_frozen_search():
+    assert load_config(EXAMPLE).search == SearchConfig(decoder="mlp", rescaled=True, chunk=50, threshold=0.05,
+                                                       steps=100, runs=5)
+
+
+def test_a_config_without_a_search_section_gets_the_frozen_search(example_raw):
+    del example_raw["search"]
+    assert parse_config(example_raw).search == load_config(EXAMPLE).search      # the example writes them out
+
+
+def test_a_search_setting_left_out_gets_its_default(example_raw):
+    encoder = parse_config(example_raw).encoder
+    assert _parse_search({"decoder": "cnn", "runs": 2}, encoder) == SearchConfig(decoder="cnn", runs=2)
+
+
+@pytest.mark.parametrize("key, value, message", [
+    ("decoder", "svm", "'search.decoder' must be one of random_forest, mlp, cnn"),
+    ("rescaled", "yes", "'search.rescaled' must be true or false"),
+    ("rescaled", 1, "'search.rescaled' must be true or false"),
+    ("chunk", 0, "'search.chunk' must be at least 1"),
+    ("chunk", 51, "'search.chunk' can be at most the budget, 50"),
+    ("chunk", 12.5, "'search.chunk' must be a whole number"),
+    ("threshold", -0.01, "'search.threshold' must be a number of bits, 0 or more"),
+    ("threshold", float("nan"), "'search.threshold' must be a number of bits, 0 or more"),
+    ("threshold", "0.05", "'search.threshold' must be a number of bits, 0 or more"),
+    ("steps", 0, "'search.steps' must be at least 1"),
+    ("runs", 0, "'search.runs' must be at least 1"),
+])
+def test_each_search_rule(example_raw, key, value, message):
+    example_raw["search"][key] = value
+    with pytest.raises(ConfigError, match=message):
+        parse_config(example_raw)
+
+
+def test_a_typo_in_the_search_section(example_raw):
+    example_raw["search"]["treshold"] = example_raw["search"].pop("threshold")
+    with pytest.raises(ConfigError, match="Did you mean 'threshold'"):
+        parse_config(example_raw)
+
+
+def test_a_threshold_of_0_keeps_every_gain(example_raw):
+    example_raw["search"]["threshold"] = 0
+    assert parse_config(example_raw).search.threshold == 0.0

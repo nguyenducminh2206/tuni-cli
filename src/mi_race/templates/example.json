@@ -44,5 +44,13 @@
   },
   "output": {
     "dir": "outputs"
+  },
+  "search": {
+    "decoder": "mlp",
+    "rescaled": true,
+    "chunk": 50,
+    "threshold": 0.05,
+    "steps": 100,
+    "runs": 5
   }
 }

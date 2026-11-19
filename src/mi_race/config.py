@@ -70,6 +70,17 @@ class OutputConfig:
     dir: str = "outputs"
 
 @dataclass(frozen=True)
+class SearchConfig:
+    """the search section: how the encoder search runs. The defaults are the settings frozen in step 8f
+    (ENCODER_PLAN.md section 11.11): the rescaled MLP scores each codebook, a move shifts a whole burst"""
+    decoder: str = "mlp"        # the decoder whose BA bound scores a codebook: random_forest, mlp or cnn
+    rescaled: bool = True       # that decoder fits a temperature on held-back runs, so its bound is calibrated
+    chunk: int = 50             # molecules one move shifts from one slot to another
+    threshold: float = 0.05     # bits a move must gain to be kept: about 2 × the noise of a paired comparison
+    steps: int = 100            # moves tried in one search run
+    runs: int = 5               # independent search runs, each with its own random streams
+
+@dataclass(frozen=True)
 class Config:
     """a complete, checked config: one field per section of the json file"""
     schema_version: int
@@ -79,6 +90,7 @@ class Config:
     seed: int = 0                                   # master seed for all randomness
     decoders: dict = field(default_factory=dict)    
     output: OutputConfig = field(default_factory=OutputConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
 
 
 def read_config_file(path: str | Path) -> dict:
@@ -195,6 +207,26 @@ def _parse_symbols(raw: object, n_slots: int, budget: int) -> tuple[tuple[int, .
         vectors.append(amounts)
     return tuple(vectors)
 
+def _parse_search(raw: object, encoder: EncoderConfig) -> SearchConfig:
+    """check the search section and build a SearchConfig; a setting left out gets its default"""
+    _check_keys(raw, "search", required=(), optional=tuple(f.name for f in fields(SearchConfig)))
+    default = SearchConfig()
+    decoder = raw.get("decoder", default.decoder)
+    if decoder not in DECODERS:
+        raise ConfigError(f"'search.decoder' must be one of {', '.join(DECODERS)}, got {decoder!r}")
+    rescaled = raw.get("rescaled", default.rescaled)
+    if not isinstance(rescaled, bool):
+        raise ConfigError(f"'search.rescaled' must be true or false, got {rescaled!r}")
+    chunk = _whole(raw.get("chunk", default.chunk), "search.chunk", minimum=1)
+    if chunk > encoder.budget:
+        raise ConfigError(f"'search.chunk' can be at most the budget, {encoder.budget}, got {chunk}")
+    threshold = raw.get("threshold", default.threshold)
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) \
+            or threshold < 0:
+        raise ConfigError(f"'search.threshold' must be a number of bits, 0 or more, got {threshold!r}")
+    return SearchConfig(decoder=decoder, rescaled=rescaled, chunk=chunk, threshold=float(threshold),
+                        steps=_whole(raw.get("steps", default.steps), "search.steps", minimum=1),
+                        runs=_whole(raw.get("runs", default.runs), "search.runs", minimum=1))
 
 def _parse_encoder(raw: object, channel: ChannelConfig) -> EncoderConfig:
     """check the encoder section and build an EncoderConfig"""
@@ -291,17 +323,19 @@ def parse_config(raw: object) -> Config:
     _check_keys(
         raw, "config", 
         required=("schema_version", "channel", "encoder", "data"),
-        optional=("seed", "decoders", "output"),
+        optional=("seed", "decoders", "output", "search"),
     )
     channel = _parse_channel(raw["channel"])
+    encoder = _parse_encoder(raw["encoder"], channel)
     return Config(
         schema_version=SCHEMA_VERSION,
         channel=channel,
-        encoder=_parse_encoder(raw["encoder"], channel),
+        encoder=encoder,
         data=_parse_data(raw["data"]),
         seed=_whole(raw.get("seed", Config.seed), "seed", minimum=0),
         decoders=_parse_decoders(raw.get("decoders", {}), channel),
-        output=_parse_output(raw.get("output", {}))
+        output=_parse_output(raw.get("output", {})),
+        search=_parse_search(raw.get("search", {}), encoder),
     )
 
 

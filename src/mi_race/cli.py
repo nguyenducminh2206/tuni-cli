@@ -51,6 +51,9 @@ def describe(cfg: Config) -> str:
                     f"budget {encoder.budget}"),
         ("data", f"{data.runs_per_symbol} runs per symbol · {test_runs} test runs · {data.path}"),
         ("decoders", " · ".join(DECODER_NAMES[name] for name in cfg.decoders) or "none"),
+        ("search", f"{'rescaled ' if cfg.search.rescaled else ''}{DECODER_NAMES[cfg.search.decoder]} · "
+            f"chunk {cfg.search.chunk} · θ {cfg.search.threshold:g} bits · {cfg.search.steps} steps · "
+            f"{cfg.search.runs} runs"),
         ("seed", str(cfg.seed)),
         ("output", cfg.output.dir),
     ], color())
