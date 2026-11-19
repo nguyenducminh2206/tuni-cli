@@ -13,8 +13,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import warnings
-from dataclasses import asdict
+from dataclasses import asdict, replace
+from functools import partial
 from datetime import datetime
 from importlib import resources
 from pathlib import Path
@@ -22,12 +24,14 @@ from pathlib import Path
 import numpy as np
 
 from mi_race import __version__, ui
+from mi_race.compare import measure_noise
 from mi_race.config import Config, ConfigError, load_config, parse_config, read_config_file, write_config_file
 from mi_race.dataset import (DatasetError, check_dataset, read_dataset, simulate_dataset, split_dataset,
                              write_dataset)
+from mi_race.decisions import DecisionLog, DecisionLogError
 from mi_race.decoders.rescaling import train_rescaled
 from mi_race.metrics import evaluate
-from mi_race.search import TRAINERS
+from mi_race.search import TRAINERS, FOLDS, score_codebook, search
 from mi_race.streams import random_stream
 from mi_race.symbols import SymbolError, ask_symbols, write_symbols
 
@@ -368,7 +372,154 @@ def run_check(args) -> int:
     return 0
 
 
-# --- the command line ----------------------------------------------------------------------------
+# --- the guided search ---
+
+def codebook_text(symbols) -> str:
+    """a codebook on one line, as symbols are typed: '50:0 · 50:3 · 25:5 25:6 · 50:9'"""
+    return " · ".join(" ".join(f"{amount}:{k}" for k, amount in enumerate(vector) if amount) for vector in symbols)
+
+
+def wrap_codebook(text: str, room: int) -> list[str]:
+    """a codebook_text cut into lines of at most room columns, only between symbols"""
+    lines = [""]
+    for symbol in text.split(" · "):
+        joined = f"{lines[-1]} · {symbol}" if lines[-1] else symbol
+        if len(joined) <= room or not lines[-1]:
+            lines[-1] = joined
+        else:
+            lines.append(symbol)
+    return lines
+
+
+def write_json(path: Path, data: dict) -> None:
+    """a result file: indented, each list of plain numbers on one line, numpy values as plain ones"""
+    text = json.dumps(data, indent=2, ensure_ascii=False, default=lambda value: value.tolist())
+    text = re.sub(r"\[\n\s+([-\d.,\s]+?)\n\s+\]", lambda m: "[" + " ".join(m[1].split()) + "]", text)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text + "\n", encoding="utf-8")
+
+
+def feedback(cfg: Config):
+    """the score of the search: the BA bound of the config's search decoder, out of fold"""
+    return partial(score_codebook, decoder=cfg.search.decoder, rescaled=cfg.search.rescaled)
+
+
+def move_text(parent, moved) -> str:
+    """a move in words: 'symbol 1 · 10 molecules from slot 3 to slot 4'"""
+    u = next(u for u, (a, b) in enumerate(zip(parent, moved)) if tuple(a) != tuple(b))
+    before, after = parent[u], moved[u]
+    source = next(k for k in range(len(before)) if after[k] < before[k])
+    target = next(k for k in range(len(before)) if after[k] > before[k])
+    return f"symbol {u} · {before[source] - after[source]} molecules from slot {source} to slot {target}"
+
+
+def set_threshold(cfg: Config, config_path: str, log: DecisionLog) -> tuple[Config, dict]:
+    """step 1: measure the noise of the search's feedback and propose θ = 2 × sd, written to the config
+    after a yes. Returns the config the search runs with, and the noise measurement"""
+    current = cfg.search.threshold
+    with ui.Progress("noise", "noise measured", unit="pairs") as bar:
+        noise = measure_noise(cfg, feedback(cfg), progress=bar)
+    proposed = noise["threshold"]
+    print()
+    print(ui.section("noise of the feedback", "a nearly neutral move against its parent", ui.facts([
+        ("move", move_text(noise["parent"], noise["moved"])),
+        ("noise", f"sd {noise['sd']:.4f} bits on {len(noise['differences'])} paired datasets · "
+                  f"mean {noise['mean']:+.4f} bits"),
+        ("threshold", f"{current:g} bits now · 2 × sd ≈ {proposed:g} bits")], color()), color()))
+    print()
+    if proposed == current:
+        print(ui.done("threshold kept", f"{current:g} bits is 2 × sd", color=color()))
+        return cfg, noise
+    evidence = {"move": move_text(noise["parent"], noise["moved"]), "pairs": len(noise["differences"]),
+                "sd_bits": noise["sd"], "mean_bits": noise["mean"], "threshold_now": current}
+    if not log.ask("threshold", f"Set search.threshold in {config_path} to {proposed:g} bits?",
+                   evidence=evidence, proposal={"search.threshold": proposed}):
+        print(ui.info(f"threshold kept · {current:g} bits", color()))
+        return cfg, noise
+    raw = read_config_file(config_path)
+    raw.setdefault("search", {})["threshold"] = proposed
+    write_config_file(config_path, raw)
+    print()
+    print(ui.done("threshold set", f"{proposed:g} bits", config_path, color=color()))
+    return replace(cfg, search=replace(cfg.search, threshold=proposed)), noise
+
+
+def search_runs(cfg: Config, output: Path, record: dict) -> list:
+    """step 2: the search runs from the config's codebook, one after another; search.json is saved
+    after each, so a search stopped early keeps the runs that ended"""
+    settings = cfg.search
+    for r in range(settings.runs):
+        label = f"run {r + 1} of {settings.runs}"
+        began = time.monotonic()
+        with ui.Progress(label, label, unit="steps") as bar:
+            final, history = search(cfg, cfg.encoder.symbols, settings.steps, run=r, score=feedback(cfg),
+                                    chunk=settings.chunk, threshold=settings.threshold, progress=bar)
+        record["runs"].append({"run": r, "steps": settings.steps, "final": final, "history": history,
+                               "seconds": round(time.monotonic() - began, 1)})
+        write_json(output, record)
+    return record["runs"]
+
+
+def runs_table(runs: list) -> str:
+    """one line per run: the moves it kept, the step of the last one, and the codebook it ended with"""
+    header = ["run", "kept", "last kept", "codebook"]
+    rows = []
+    for run in runs:
+        kept = [row["step"] for row in run["history"] if row["accepted"]]
+        rows.append([str(run["run"] + 1), str(len(kept)), f"step {kept[-1] + 1}" if kept else "–",
+                     codebook_text(run["final"])])
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(3)]
+    left = len(ui.INDENT) + sum(widths) + 3 * 3                     # where the codebook starts
+    lines = [ui.INDENT + ui.paint("   ".join([header[0].rjust(widths[0]), header[1].rjust(widths[1]),
+                                               header[2].rjust(widths[2]), header[3]]), ui.DIM, color())]
+    for row in rows:
+        codebook = wrap_codebook(row[3], ui.WIDTH - left)
+        lines.append(ui.INDENT + "   ".join([row[0].rjust(widths[0]), row[1].rjust(widths[1]),
+                                              row[2].rjust(widths[2]), codebook[0]]))
+        lines += [" " * left + more for more in codebook[1:]]
+    return "\n".join(lines)
+
+
+def run_search(args) -> int:
+    """mi-race search CONFIG: the guided encoder search. The tool proposes every change, shows the evidence
+    and asks yes/no; a no keeps what is there. The questions, evidence and answers go to
+    output.dir/decisions.json, the runs to output.dir/search.json.
+    Step 1: the threshold, from the noise of the feedback. Step 2: the runs"""
+    print(ui.heading("search", args.config, color()))
+    print()
+    cfg = load_config(args.config)
+    settings = cfg.search
+    output = Path(cfg.output.dir) / "search.json"
+    log = DecisionLog(cfg.output.dir, "search", args.config, accept_defaults=args.yes)
+    start = wrap_codebook(codebook_text(cfg.encoder.symbols), ui.WIDTH - len(ui.INDENT) - len("feedback  "))
+    print(ui.facts([("feedback", f"{'rescaled ' if settings.rescaled else ''}{DECODER_NAMES[settings.decoder]} · "
+                                 f"BA bound on a new dataset each step · {FOLDS}-fold"),
+                    ("moves", f"{settings.chunk} molecules · kept if the gain is above θ {settings.threshold:g} bits"),
+                    ("runs", f"{settings.runs} · {settings.steps} steps each, from the config's codebook"),
+                    ("start", start[0]), *[("", line) for line in start[1:]],
+                    ("results", f"{output} · {log.path}")], color()))
+    print()
+    if output.exists():
+        if not log.ask("replace", f"{output} already holds a search. Search again and replace it?", yes=False):
+            print(ui.info(f"nothing searched · {output} is unchanged", color()))
+            return 0
+        print()
+    cfg, noise = set_threshold(cfg, args.config, log)
+    print()
+    record = {"mi_race": __version__, "created": datetime.now().isoformat(timespec="seconds"),
+              "config_file": args.config, "config": read_config_file(args.config), "seed": cfg.seed,
+              "settings": asdict(cfg.search), "noise": noise, "runs": []}
+    write_json(output, record)
+    runs = search_runs(cfg, output, record)
+    print()
+    print(ui.section("runs", f"{cfg.search.steps} steps each · θ {cfg.search.threshold:g} bits", runs_table(runs), color()))
+    print()
+    print(ui.done("search saved", f"{len(runs)} runs", size(output), color=color()))
+    print(ui.facts([("file", str(output.resolve()))], color()))
+    return 0
+
+
+# --- the command line ---
 
 class CommandLineError(Exception):
     """a command typed wrong: unknown command, a missing or an extra argument"""
@@ -409,6 +560,11 @@ def build_parser() -> Parser:
     run = commands.add_parser("run", help="train and score every decoder, plain and rescaled; save metrics.json")
     run.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
     run.set_defaults(run=run_run)
+
+    guided = commands.add_parser("search", help="the guided encoder search: it proposes, you answer yes or no")
+    guided.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
+    guided.add_argument("--yes", action="store_true", help="take every default answer, e.g. in a batch job")
+    guided.set_defaults(run=run_search)
 
     check = commands.add_parser("check", help="check a config against every rule and show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")
@@ -453,7 +609,7 @@ def run_command(parser: Parser, words: list[str]) -> int:
     except CommandLineError as problem:
         complain(f"{problem} · 'help' lists the commands")
         return 2
-    except (ConfigError, DatasetError, SymbolError, OSError) as problem:
+    except (ConfigError, DatasetError, SymbolError, DecisionLogError, OSError) as problem:
         complain(str(problem))
         return 1
     except KeyboardInterrupt:
@@ -461,7 +617,7 @@ def run_command(parser: Parser, words: list[str]) -> int:
         complain("stopped")
         return 130
     except SystemExit as stop:                                      # --help and --version end here, not the shell
-        return stop.code if isinstance(stop.code, int) else 0
+        return stop.code if isinstance(stop.code, int) else 0  
 
 
 def line_editing() -> str | None:
