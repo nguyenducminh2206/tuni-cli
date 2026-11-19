@@ -6,7 +6,9 @@ Each command is a function run_<name>(args) that returns the exit code. Warnings
 
 import argparse
 import atexit
+import copy
 import json
+import math
 import os
 import re
 import shlex
@@ -124,12 +126,145 @@ def edit_until_valid(path: Path) -> Config | None:
             print()
 
 
+# --- the questions of a new config ---------------------------------------------------------------
+
+QUESTIONS = [                               # what 'new' asks, in this order: (section, key, what it is · unit)
+    ("channel", "L", "channel length · L-1 compartments, then the receiver"),
+    ("channel", "h", "compartment width · µm"),
+    ("channel", "D", "diffusion coefficient · µm²/s"),
+    ("channel", "T", "recording time · s"),
+    ("channel", "dt", "time between snapshots · s"),
+    ("encoder", "n_slots", "release slots"),
+    ("encoder", "slot_dt", "time between slots · s"),
+    ("encoder", "budget", "molecules per symbol"),
+    ("data", "runs_per_symbol", "simulated runs per symbol"),
+]
+SECTION_NOTES = {"channel": "where the molecules diffuse", "encoder": "when a symbol releases its molecules",
+                 "data": "the simulated dataset"}
+
+
+def typed_value(text: str, default):
+    """a typed answer, read as JSON reads a number ('30' → 30, '0.05' → 0.05); a whole number for a setting
+    with decimals gets them (2 → 2.0); anything else stays text, for the config's own checks to name"""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return text
+    return float(value) if isinstance(default, float) and type(value) is int else value
+
+
+def is_number(*values) -> bool:
+    """every value a finite number (not true or false)"""
+    return all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values)
+
+
+def round_below(limit: float) -> float:
+    """the largest of 1, 2 and 5 × 10^k below limit: a round time step that fits (0.069 → 0.05)"""
+    power = 10.0 ** math.floor(math.log10(limit))
+    for value in (5 * power, 2 * power, power, power / 2):
+        if value < limit * (1 - 1e-9):
+            return float(f"{value:.12g}")
+
+
+def fit_timing(raw: dict) -> str:
+    """lower encoder.slot_dt to a round value if the last slot would release at or after channel.T.
+    Returns what changed, or '' (nothing to do, or a value the config's checks will name)"""
+    encoder, T = raw["encoder"], raw["channel"]["T"]
+    n_slots, slot_dt = encoder["n_slots"], encoder["slot_dt"]
+    if not is_number(n_slots, slot_dt, T) or n_slots < 2 or T <= 0 or (n_slots - 1) * slot_dt < T * (1 - 1e-9):
+        return ""
+    encoder["slot_dt"] = round_below(T / (n_slots - 1))
+    last = n_slots - 1
+    return (f"slot_dt lowered to {encoder['slot_dt']:g} s: slot {last} releases at {last * encoder['slot_dt']:g} s, "
+            "before T")
+
+
+def spread_codebook(n_symbols: int, n_slots: int, budget: int) -> list[list[int]]:
+    """a codebook for any slots and budget: one burst per symbol, spread evenly from the first slot to the
+    last (4 symbols on 10 slots: slots 0, 3, 6 and 9, as in the example). With fewer slots than symbols,
+    the budget is split between the first slot and the last, in even steps"""
+    codebook = [[0] * n_slots for _ in range(n_symbols)]
+    if n_slots >= n_symbols:
+        for u in range(n_symbols):                      # u × (n_slots - 1) / (n_symbols - 1), rounded half up
+            codebook[u][(2 * u * (n_slots - 1) + n_symbols - 1) // (2 * (n_symbols - 1))] = budget
+    elif n_slots >= 2 and budget >= n_symbols - 1:
+        for u in range(n_symbols):
+            late = (2 * u * budget + n_symbols - 1) // (2 * (n_symbols - 1))
+            codebook[u][0], codebook[u][-1] = budget - late, late
+    else:
+        raise ConfigError(f"{n_slots} slot{'s' if n_slots > 1 else ''} with a budget of {budget} can't make "
+                          f"{n_symbols} different symbols: use more slots or a larger budget")
+    return codebook
+
+
+def fit_codebook(raw: dict) -> str:
+    """a codebook spread over the slots (spread_codebook) if the symbols no longer fit n_slots or the budget.
+    Returns what changed, or ''"""
+    encoder = raw["encoder"]
+    n_slots, budget, symbols = encoder["n_slots"], encoder["budget"], encoder["symbols"]
+    if not (type(n_slots) is int and type(budget) is int and n_slots >= 1 and budget >= 1):
+        return ""                                       # the config's checks name the value
+    if all(len(vector) == n_slots and sum(vector) == budget for vector in symbols):
+        return ""
+    encoder["symbols"] = spread_codebook(len(symbols), n_slots, budget)
+    return f"codebook spread over the slots: {codebook_text(encoder['symbols'])}"
+
+
+def try_answer(raw: dict, section: str, key: str, value) -> tuple[dict, Config, list[str], list[str]]:
+    """the config with one answer in it, slot_dt and the codebook fitted to it where needed, and checked by
+    every rule. The config was valid before, so a broken rule is the answer's: ConfigError.
+    Returns the new raw config, the checked one, what was fitted, and any warnings"""
+    candidate = copy.deepcopy(raw)
+    candidate[section][key] = value
+    notes = [fit_timing(candidate) if key != "slot_dt" else "", fit_codebook(candidate)]
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        cfg = parse_config(candidate)
+    return candidate, cfg, [note for note in notes if note], [str(warning.message) for warning in caught]
+
+
+def ask_values(raw: dict) -> tuple[dict, Config]:
+    """the questions of a new config, one setting at a time (QUESTIONS). Enter keeps the value in brackets;
+    a typed value is checked at once with every rule of the config, and asked again, with the reason, if it
+    breaks one. Returns the answered raw config and the checked one"""
+    cfg = parse_config(raw)
+    current, shown = None, set()
+    for section, key, meaning in QUESTIONS:
+        if section != current:
+            print()
+            print(ui.section(section, SECTION_NOTES[section], color=color()))
+            print()
+            current = section
+            width = max(len(other) for part, other, _ in QUESTIONS if part == section)    # the keys line up
+        default = raw[section][key]
+        while True:
+            try:
+                text = input(ui.value_prompt(key, meaning, f"{default:g}", width, color())).strip()
+            except EOFError:                                        # Ctrl-D: stop, nothing is written
+                raise KeyboardInterrupt from None
+            value = typed_value(text, default) if text else default
+            try:
+                raw, cfg, notes, caught = try_answer(raw, section, key, value)
+                break
+            except ConfigError as problem:
+                complain(str(problem))
+        for note in notes:
+            print(ui.info(note, color()))
+        for message in caught:
+            if message not in shown:                                # each warning once, under its answer
+                shown.add(message)
+                sys.stdout.flush()
+                print(ui.warning(message, ui.use_color(sys.stderr)), file=sys.stderr)
+    return raw, cfg
+
+
 # --- commands ------------------------------------------------------------------------------------
 
 def run_new(args) -> int:
-    """mi-race new NAME: a config for a new experiment, copied from the example, with its own data file
-    (data/NAME.csv) and output folder (outputs/NAME). It is checked before it is written, and an existing
-    file is never overwritten"""
+    """mi-race new NAME: a config for a new experiment, from the example, with its own data file
+    (data/NAME.csv) and output folder (outputs/NAME). At a terminal it asks for the settings that define the
+    experiment, each checked as it is typed, shows the config and writes it after a yes; without one it
+    copies the example. An existing file is never overwritten"""
     path = Path(args.folder) / f"{args.name}.json"
     print(ui.heading("new", str(path), color()))
     print()
@@ -140,21 +275,38 @@ def run_new(args) -> int:
     raw = template()
     raw["data"]["path"] = f"data/{args.name}.csv"
     raw["output"]["dir"] = f"outputs/{args.name}"
-    cfg = parse_config(raw)                         # every rule passes before anything is written
+    if not interactive():                           # a batch job: the example, checked before it is written
+        cfg = parse_config(raw)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_config_file(path, raw)
+        print(describe(cfg))
+        print()
+        print(ui.done("config created", str(path), color=color()))
+        print()
+        print(ui.facts([("next", f"edit {path}"), ("", f"then: check {path}")], color()))
+        return 0
+    print(ui.info("Enter keeps the value in brackets · Ctrl-C stops without writing", color()))
+    raw, cfg = ask_values(raw)
+    print()
+    show_config(cfg)
+    print()
+    if not ui.ask(f"Write {path}?"):
+        print(ui.info(f"nothing written · {path} was not created", color()))
+        return 0
     path.parent.mkdir(parents=True, exist_ok=True)
     write_config_file(path, raw)
-    print(describe(cfg))
     print()
     print(ui.done("config created", str(path), color=color()))
     print()
-    if interactive() and ui.ask(f"Open {path} in {Path(editor()[0]).name} to set the channel, symbols and decoders?"):
+    if ui.ask(f"Open {path} in {Path(editor()[0]).name} to check it?", yes=False):
         print()
         edited = edit_until_valid(path)
         if edited is None:
             return 1
         show_config(edited)
         return 0
-    print(ui.facts([("next", f"edit {path}"), ("", f"then: check {path}")], color()))
+    print()
+    print(ui.facts([("next", f"simulate {path}"), ("", f"or: edit {path} · for the decoders and search")], color()))
     return 0
 
 
@@ -444,38 +596,102 @@ def set_threshold(cfg: Config, config_path: str, log: DecisionLog) -> tuple[Conf
     return replace(cfg, search=replace(cfg.search, threshold=proposed)), noise
 
 
+def search_run(cfg: Config, run: dict, steps: int, label: str, finished: str) -> None:
+    """one run searched up to 'steps' steps in all, on from where its history ends, with a progress bar;
+    the run's record gets the codebook it ends with, the history, the steps and the time"""
+    settings = cfg.search
+    began = time.monotonic()
+    with ui.Progress(label, finished, unit="steps") as bar:
+        final, history = search(cfg, cfg.encoder.symbols, steps, run=run["run"], score=feedback(cfg),
+                                chunk=settings.chunk, threshold=settings.threshold, progress=bar,
+                                history=run["history"])
+    run.update(steps=steps, final=final, history=history,
+               seconds=round(run["seconds"] + time.monotonic() - began, 1))
+
+
 def search_runs(cfg: Config, output: Path, record: dict) -> list:
     """step 2: the search runs from the config's codebook, one after another; search.json is saved
     after each, so a search stopped early keeps the runs that ended"""
     settings = cfg.search
     for r in range(settings.runs):
+        run = {"run": r, "steps": 0, "final": cfg.encoder.symbols, "history": [], "seconds": 0.0}
         label = f"run {r + 1} of {settings.runs}"
-        began = time.monotonic()
-        with ui.Progress(label, label, unit="steps") as bar:
-            final, history = search(cfg, cfg.encoder.symbols, settings.steps, run=r, score=feedback(cfg),
-                                    chunk=settings.chunk, threshold=settings.threshold, progress=bar)
-        record["runs"].append({"run": r, "steps": settings.steps, "final": final, "history": history,
-                               "seconds": round(time.monotonic() - began, 1)})
+        search_run(cfg, run, settings.steps, label, label)
+        record["runs"].append(run)
         write_json(output, record)
     return record["runs"]
 
 
+def kept_steps(run: dict) -> list:
+    """the steps of a run that kept their move"""
+    return [row["step"] for row in run["history"] if row["accepted"]]
+
+
+def still_improving(run: dict, window: int) -> bool:
+    """a run that kept a move in its last 'window' steps, and did all its steps (a legal move was left)"""
+    kept = kept_steps(run)
+    return len(run["history"]) == run["steps"] and bool(kept) and kept[-1] >= run["steps"] - window
+
+
+def run_names(runs: list) -> str:
+    """'run 2', 'runs 2 and 4', 'runs 1, 2 and 4': the runs as the table numbers them"""
+    numbers = [str(run["run"] + 1) for run in runs]
+    if len(numbers) == 1:
+        return f"run {numbers[0]}"
+    return f"runs {', '.join(numbers[:-1])} and {numbers[-1]}"
+
+
+def more_steps(cfg: Config, config_path: str, output: Path, record: dict, log: DecisionLog) -> list:
+    """step 3: a run that kept a move in the last quarter of search.steps is still improving. While runs are,
+    propose to search on with them, by half of search.steps, up to twice search.steps in all"""
+    settings = cfg.search
+    window, more, most = max(1, settings.steps // 4), max(1, settings.steps // 2), 2 * settings.steps
+    last = f"last {window} steps" if window > 1 else "last step"
+    while True:
+        runs = record["runs"]
+        print(ui.section("runs", f"θ {settings.threshold:g} bits · still improving: a move kept in the {last}",
+                         runs_table(runs), color()))
+        print()
+        improving = [run for run in runs if still_improving(run, window)]
+        if not improving:
+            print(ui.done("runs settled", f"no run kept a move in its {last}", color=color()))
+            return runs
+        steps = improving[0]["steps"]                   # every run still improving has gone on as far
+        if steps >= most:
+            print(ui.warning(f"{run_names(improving)} still improving at {steps} steps, twice search.steps: "
+                             f"to search longer, raise search.steps in {config_path}", color()))
+            return runs
+        to = min(steps + more, most)
+        evidence = {"window": window, "runs": [{"run": run["run"], "steps": run["steps"], "kept": len(kept_steps(run)),
+                                                "last_kept": kept_steps(run)[-1]} for run in improving]}
+        if not log.ask("steps", f"{run_names(improving).capitalize()} kept a move in the {last}: "
+                                f"go on to {to} steps?", evidence=evidence,
+                       proposal={"runs": [run["run"] for run in improving], "steps": to}):
+            print(ui.info(f"{run_names(improving)} stopped at {steps} steps", color()))
+            return runs
+        print()
+        for run in improving:
+            label = f"run {run['run'] + 1} of {settings.runs}"
+            search_run(cfg, run, to, label, f"{label} continued")
+            write_json(output, record)
+        print()
+
+
 def runs_table(runs: list) -> str:
-    """one line per run: the moves it kept, the step of the last one, and the codebook it ended with"""
-    header = ["run", "kept", "last kept", "codebook"]
+    """one line per run: its steps, the moves it kept, the step of the last one, and the codebook it ended with"""
+    header = ["run", "steps", "kept", "last kept", "codebook"]
     rows = []
     for run in runs:
-        kept = [row["step"] for row in run["history"] if row["accepted"]]
-        rows.append([str(run["run"] + 1), str(len(kept)), f"step {kept[-1] + 1}" if kept else "–",
-                     codebook_text(run["final"])])
-    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(3)]
-    left = len(ui.INDENT) + sum(widths) + 3 * 3                     # where the codebook starts
-    lines = [ui.INDENT + ui.paint("   ".join([header[0].rjust(widths[0]), header[1].rjust(widths[1]),
-                                               header[2].rjust(widths[2]), header[3]]), ui.DIM, color())]
+        kept = kept_steps(run)
+        rows.append([str(run["run"] + 1), str(len(run["history"])), str(len(kept)),
+                     f"step {kept[-1] + 1}" if kept else "–", codebook_text(run["final"])])
+    widths = [max(len(row[i]) for row in [header, *rows]) for i in range(4)]
+    left = len(ui.INDENT) + sum(widths) + 4 * 3                     # where the codebook starts
+    lines = [ui.INDENT + ui.paint("   ".join([h.rjust(w) for h, w in zip(header, widths)] + [header[4]]),
+                                  ui.DIM, color())]
     for row in rows:
-        codebook = wrap_codebook(row[3], ui.WIDTH - left)
-        lines.append(ui.INDENT + "   ".join([row[0].rjust(widths[0]), row[1].rjust(widths[1]),
-                                              row[2].rjust(widths[2]), codebook[0]]))
+        codebook = wrap_codebook(row[4], ui.WIDTH - left)
+        lines.append(ui.INDENT + "   ".join([cell.rjust(w) for cell, w in zip(row, widths)] + [codebook[0]]))
         lines += [" " * left + more for more in codebook[1:]]
     return "\n".join(lines)
 
@@ -484,7 +700,7 @@ def run_search(args) -> int:
     """mi-race search CONFIG: the guided encoder search. The tool proposes every change, shows the evidence
     and asks yes/no; a no keeps what is there. The questions, evidence and answers go to
     output.dir/decisions.json, the runs to output.dir/search.json.
-    Step 1: the threshold, from the noise of the feedback. Step 2: the runs"""
+    Step 1: the threshold, from the noise of the feedback. Step 2: the runs. Step 3: more steps for the runs still improving"""
     print(ui.heading("search", args.config, color()))
     print()
     cfg = load_config(args.config)
@@ -495,7 +711,8 @@ def run_search(args) -> int:
     print(ui.facts([("feedback", f"{'rescaled ' if settings.rescaled else ''}{DECODER_NAMES[settings.decoder]} · "
                                  f"BA bound on a new dataset each step · {FOLDS}-fold"),
                     ("moves", f"{settings.chunk} molecules · kept if the gain is above θ {settings.threshold:g} bits"),
-                    ("runs", f"{settings.runs} · {settings.steps} steps each, from the config's codebook"),
+                    ("runs", f"{settings.runs} · {settings.steps} steps each, "
+                             f"up to {2 * settings.steps} while still improving"),
                     ("start", start[0]), *[("", line) for line in start[1:]],
                     ("results", f"{output} · {log.path}")], color()))
     print()
@@ -510,9 +727,9 @@ def run_search(args) -> int:
               "config_file": args.config, "config": read_config_file(args.config), "seed": cfg.seed,
               "settings": asdict(cfg.search), "noise": noise, "runs": []}
     write_json(output, record)
-    runs = search_runs(cfg, output, record)
+    search_runs(cfg, output, record)
     print()
-    print(ui.section("runs", f"{cfg.search.steps} steps each · θ {cfg.search.threshold:g} bits", runs_table(runs), color()))
+    runs = more_steps(cfg, args.config, output, record, log)
     print()
     print(ui.done("search saved", f"{len(runs)} runs", size(output), color=color()))
     print(ui.facts([("file", str(output.resolve()))], color()))
