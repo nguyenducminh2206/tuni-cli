@@ -17,6 +17,7 @@ import subprocess
 import sys
 import time
 import warnings
+import webbrowser
 from dataclasses import asdict, replace
 from functools import partial
 from datetime import datetime
@@ -719,6 +720,28 @@ def run_run(args) -> int:
     print()
     print(ui.done("results saved", f"{len(results)} decoders", size(output), color=color()))
     print(ui.facts([("file", str(output.resolve()))], color()))
+    return 0
+
+
+def run_report(args) -> int:
+    """mi-race report CONFIG: one HTML page with everything the experiment has produced so far (report.py),
+    written to output.dir/report.html; at a terminal it opens in the browser after a yes"""
+    from mi_race.report import build_report         # matplotlib loads only when a report is made
+    print(ui.heading("report", args.config, color()))
+    print()
+    cfg = load_config(args.config)
+    output = Path(cfg.output.dir) / "report.html"
+    page, summary = build_report(cfg, args.config)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(page, encoding="utf-8")
+    print(ui.facts(summary, color()))
+    print()
+    print(ui.done("report written", f"{len(summary)} sections", size(output), color=color()))
+    print(ui.facts([("file", str(output.resolve()))], color()))
+    if interactive():
+        print()
+        if ui.ask("Open it in your browser?"):
+            webbrowser.open(output.resolve().as_uri())
     return 0
 
 
@@ -1430,6 +1453,10 @@ def build_parser() -> Parser:
     final.add_argument("others", metavar="OTHER", nargs="*",
                        help="configs whose codebooks join the final evaluation (none: the search's)")
     final.set_defaults(run=run_final)
+
+    report = commands.add_parser("report", help="one HTML page with every result so far")
+    report.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
+    report.set_defaults(run=run_report)
 
     check = commands.add_parser("check", help="check a config's rules; show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")

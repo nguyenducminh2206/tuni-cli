@@ -243,7 +243,7 @@ def confusion_matrices(matrices: dict) -> str:
         return svg(figure)
 
 
-def learning_curves(curves: dict, best: str | None = None, ylabel: str = "score on the check datasets (bits)") -> str:
+def learning_curves(curves: dict, best: str | None = None, ylabel: str = "check score (bits)") -> str:
     """how the search climbed: each run's score on the check datasets after every step (curves: run -> its
     points, as saved in search.json, each with 'steps' and 'mean'). The lines are steps, since a codebook only
     changes when a move is kept. The best run (best) is blue and named first; the other runs are grey, named
