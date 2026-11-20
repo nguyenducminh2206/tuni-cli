@@ -33,7 +33,7 @@ from mi_race.dataset import (DatasetError, check_dataset, read_dataset, simulate
 from mi_race.decisions import DecisionLog, DecisionLogError
 from mi_race.decoders.rescaling import train_rescaled
 from mi_race.metrics import evaluate
-from mi_race.search import CHECKS, FOLDS, TRAINERS, score_codebook, search
+from mi_race.search import CHECKS, FOLDS, TRAINERS, learning_curve, score_codebook, search
 from mi_race.streams import random_stream
 from mi_race.symbols import SymbolError, ask_symbols, parse_vector, write_symbols
 
@@ -883,6 +883,27 @@ def more_steps(cfg: Config, config_path: str, output: Path, record: dict, log: D
         print()
 
 
+def learning_curves(cfg: Config, output: Path, record: dict) -> None:
+    """step 3b, for the report: the learning curve of every run, the search's own score (feedback) of its
+    codebook after each step, on the check datasets (check_data), so every step of every run is scored on the
+    same data. A codebook changes only when a move is kept, and each one is scored once: (moves kept + 1) ×
+    CHECKS scores a run. A curve keeps its first point, the steps where the score changed, and its last one;
+    saved in search.json"""
+    runs = record["runs"]
+    total, done = sum(len(run["history"]) + 1 for run in runs), 0
+    with ui.Progress("curves", "learning curves", unit=f"steps, {len(runs)} runs") as bar:
+        for run in runs:
+            def step(k: int, _: int, stats: str = "", offset: int = done, name: str = f"run {run['run'] + 1}"):
+                finished = offset + k >= total                      # the ✓ line: no stats of one run's point
+                bar(offset + k, total, "" if finished else stats, f"{name} of {len(runs)}")
+            curve = learning_curve(cfg, cfg.encoder.symbols, run["history"], every=1, score=feedback(cfg),
+                                   progress=step)
+            run["curve"] = [point for i, point in enumerate(curve)
+                            if i in (0, len(curve) - 1) or point["mean"] != curve[i - 1]["mean"]]
+            done += len(run["history"]) + 1
+            write_json(output, record)
+
+
 def runs_table(runs: list) -> str:
     """one line per run: its steps, the moves it kept, the step of the last one, and the codebook it ended with"""
     header = ["run", "steps", "kept", "last kept", "codebook"]
@@ -1094,7 +1115,8 @@ def run_search(args) -> int:
     and asks yes/no; a no keeps what is there. The questions, evidence and answers go to
     output.dir/decisions.json, the runs to output.dir/search.json.
     Step 0: the settings, typed (at a terminal, without --yes). Step 1: the threshold, from the noise of the
-    feedback. Step 2: the runs. Step 3: more steps for the runs still improving. Step 4: the found codebooks
+    feedback. Step 2: the runs. Step 3: more steps for the runs still improving, then each run's learning
+    curve on the check datasets, for the report. Step 4: the found codebooks
     checked against the start, and the best one's config proposed. Step 5: the final evaluation, once"""
     print(ui.heading("search", args.config, color()))
     print()
@@ -1127,6 +1149,8 @@ def run_search(args) -> int:
     search_runs(cfg, output, record)
     print()
     runs = more_steps(cfg, args.config, output, record, log)
+    print()
+    learning_curves(cfg, output, record)
     print()
     check_found(cfg, args.config, output, record, log)
     print()

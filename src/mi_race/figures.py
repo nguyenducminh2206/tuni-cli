@@ -135,7 +135,7 @@ def mean_signal(cfg: Config, rows: np.ndarray) -> str:
             ax = figure.subplots()
             for u, signal in enumerate(signals):
                 ax.plot(times, signal, color=symbol_color(u, n), label=f"symbol {u}")
-            name_ends(ax, times[-1], {f"symbol {u}": signal[-1] for u, signal in enumerate(signals)})
+            name_ends(ax, {f"symbol {u}": (times[-1], signal[-1]) for u, signal in enumerate(signals)})
             ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=n, handlelength=1.5)
             axes = [ax]
         else:
@@ -159,19 +159,26 @@ def mean_signal(cfg: Config, rows: np.ndarray) -> str:
         return svg(figure)
 
 
-def name_ends(ax, x: float, ends: dict, log: bool = False) -> None:
-    """each curve's name just right of its end (ends: name -> the curve's last value), so it is named on the
-    plot as well as in the legend; a name that would overlap another one is left to the legend.
-    log: the y axis is logarithmic, so closeness is measured in decades"""
+def name_ends(ax, ends: dict, log: bool = False, strong: str | None = None) -> list[str]:
+    """each curve's name just right of its last point (ends: name -> (x, y)), so it is named on the plot as well
+    as in a legend; a name that would overlap one already placed is left out. log: the y axis is logarithmic,
+    so closeness is measured in decades. strong: the one name in primary ink, placed first.
+    Returns the names left out"""
     scale = (lambda y: np.log10(max(y, 1e-12))) if log else (lambda y: y)
-    span = (max(map(scale, ends.values())) - min(map(scale, ends.values()))) if log else max(ends.values())
-    placed = []
-    for name, y in sorted(ends.items(), key=lambda item: -item[1]):
-        if any(abs(scale(y) - scale(other)) < 0.07 * (span or 1) for other in placed):
+    heights = [scale(y) for _, y in ends.values()]
+    span_y = (max(heights) - min(heights)) if log else max(heights)
+    span_x = max(x for x, _ in ends.values())
+    placed, left_out = [], []
+    for name in sorted(ends, key=lambda name: (name != strong, -ends[name][1])):
+        x, y = ends[name]
+        if any(abs(x - px) < 0.15 * (span_x or 1) and abs(scale(y) - scale(py)) < 0.07 * (span_y or 1)
+               for px, py in placed):
+            left_out.append(name)
             continue
-        ax.annotate(name, (x, y), xytext=(4, 0), textcoords="offset points", va="center", fontsize=7.5,
-                    color=SECONDARY, annotation_clip=False)
-        placed.append(y)
+        ax.annotate(name, (x, y), xytext=(5, 0), textcoords="offset points", va="center", fontsize=7.5,
+                    color=INK if name == strong else SECONDARY, annotation_clip=False)
+        placed.append((x, y))
+    return left_out
 
 
 def training_loss(losses: dict) -> str | None:
@@ -188,7 +195,7 @@ def training_loss(losses: dict) -> str | None:
         for name, values in curves.items():
             ax.plot(np.arange(1, len(values) + 1), values, color=decoder_color(name), label=DECODERS[name])
         last = max(len(values) for values in curves.values())
-        name_ends(ax, last, {DECODERS[name]: values[-1] for name, values in curves.items()}, log=True)
+        name_ends(ax, {DECODERS[name]: (len(values), values[-1]) for name, values in curves.items()}, log=True)
         if len(curves) > 1:
             ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(curves), handlelength=1.5)
         ax.set_yscale("log")
@@ -233,4 +240,40 @@ def confusion_matrices(matrices: dict) -> str:
                          fontsize=8.5, color=INK)
         if max(len(matrix) for matrix in matrices.values()) > 8:   # no counts in the cells: a scale instead
             figure.colorbar(image, ax=list(axes), shrink=0.8, label="share of the row").outline.set_visible(False)
+        return svg(figure)
+
+
+def learning_curves(curves: dict, best: str | None = None, ylabel: str = "score on the check datasets (bits)") -> str:
+    """how the search climbed: each run's score on the check datasets after every step (curves: run -> its
+    points, as saved in search.json, each with 'steps' and 'mean'). The lines are steps, since a codebook only
+    changes when a move is kept. The best run (best) is blue and named first; the other runs are grey, named
+    where their ends are apart, else together as 'other runs'. All runs start from one codebook, so they share
+    the first point"""
+    with rc_context(STYLE):
+        figure = Figure(figsize=(WIDTH, 2.8), layout="constrained")
+        ax = figure.subplots()
+        ends = {}
+        for label, points in curves.items():
+            steps, means = [p["steps"] for p in points], [p["mean"] for p in points]
+            strong = label == best
+            ax.plot(steps, means, drawstyle="steps-post", color=SERIES[0] if strong else MUTED,
+                    linewidth=1.5 if strong else 1.0, zorder=3 if strong else 2)
+            ax.plot(steps[-1], means[-1], "o", markersize=5, color=SERIES[0] if strong else MUTED,
+                    markeredgecolor=SURFACE, markeredgewidth=1.5, zorder=4 if strong else 2)
+            ends[f"{label} · best found" if strong else label] = (steps[-1], means[-1])
+        first = next(iter(curves.values()))[0]
+        ax.annotate(f"start · {first['mean']:.2f}", (0, first["mean"]), xytext=(5, -9), textcoords="offset points",
+                    fontsize=7.5, color=SECONDARY)
+        ax.set_xlim(0, max(x for x, _ in ends.values()))
+        ax.set_ylim(bottom=0)
+        left_out = name_ends(ax, ends, strong=f"{best} · best found" if best in curves else None)
+        if left_out:                                    # grey runs ending too close together: one name for them
+            x, y = max(ends[name][0] for name in left_out), min(ends[name][1] for name in left_out)
+            ax.annotate("other runs" if len(left_out) > 1 else left_out[0], (x, y), xytext=(5, -10),
+                        textcoords="offset points", va="center", fontsize=7.5, color=SECONDARY,
+                        annotation_clip=False)
+        ax.set_xlabel("step")
+        ax.set_ylabel(ylabel)
+        ax.grid(axis="x", visible=False)
+        plain_ticks(ax)
         return svg(figure)
