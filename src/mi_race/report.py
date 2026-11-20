@@ -7,13 +7,14 @@ The styles sit in STYLE and the figures are inline SVG (figures.py), so the page
 import html
 import json
 import warnings
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from mi_race import __version__, figures
-from mi_race.config import Config, ConfigError, load_config, read_config_file
+from mi_race.config import Config, ConfigError, load_config, parse_config, read_config_file
 from mi_race.dataset import DatasetError, check_dataset, read_dataset
 from mi_race.decisions import DecisionLogError, read_log
 
@@ -360,6 +361,96 @@ def search_section(config_path: Path, folder: Path, searched: Path) -> tuple[str
     return "".join(parts), summary
 
 
+def results_of(config_path: Path | None, symbols) -> tuple[np.ndarray | None, dict | None, list[str]]:
+    """what a config holds for one codebook of a search: its dataset and its decoders' results (metrics.json),
+    each None if missing, with the commands that would make them. A config whose codebook is no longer this
+    one holds nothing for it"""
+    if config_path is None or not config_path.exists():
+        return None, None, ["no config holds this codebook"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            cfg = load_config(config_path)
+        except ConfigError:
+            return None, None, [f"{text(config_path)} can't be read"]
+    if [list(vector) for vector in cfg.encoder.symbols] != [list(vector) for vector in symbols]:
+        return None, None, [f"{text(config_path)} holds another codebook now"]
+    missing, rows = [], None
+    try:
+        rows = read_dataset(cfg.data.path)
+        check_dataset(rows, cfg)
+    except DatasetError:
+        rows = None
+        missing.append(command(f"simulate {config_path}"))
+    metrics = read_json(Path(cfg.output.dir) / "metrics.json")
+    if metrics is None:
+        missing.append(command(f"run {config_path}"))
+    return rows, metrics and metrics["decoders"], missing
+
+
+def before_after_section(searched: Path, search_folder: Path, final_folder: Path) -> tuple[str, str]:
+    """the search's start codebook and its best found one, side by side: symbol by symbol, their release
+    schedules, their mean received signals (from each config's dataset), each decoder's results on each (from
+    each config's metrics.json), and the final evaluation's gain in one line. Nothing is computed here: what is
+    missing is named with the command that makes it. Returns the section and a summary"""
+    head = '<section id="before-after"><h2>Before and after</h2>'
+    record = read_json(search_folder / "search.json")
+    check = (record or {}).get("check")
+    if not check:
+        return (head + note("Shown once a search has found a codebook: the search's check picks the best one.")
+                + "</section>", "no found codebook yet")
+    best = check["best"]
+    start, found = check["codebooks"]["start"], check["codebooks"][best]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        before = parse_config(record["config"])                     # the experiment as it was searched
+    after = replace(before, encoder=replace(before.encoder, symbols=tuple(map(tuple, found))))
+    found_path = Path(record["found_config"]) if record.get("found_config") else None
+    rows_before, metrics_before, missing_before = results_of(searched, start)
+    rows_after, metrics_after, missing_after = results_of(found_path, found)
+    parts = [
+        head,
+        f'<p class="lead">The start codebook of the search, and {text(best)}, the best codebook it found'
+        + (f" (now {text(found_path)})" if found_path else "") + ".</p>",
+        table(["symbol", "start", "found", ""],
+              [[f"symbol {u}", f"<code>{typed(a)}</code>", f"<code>{typed(b)}</code>",
+                "same" if list(a) == list(b) else "moved"] for u, (a, b) in enumerate(zip(start, found))],
+              wrap={1, 2}),
+        figure(figures.compare_schedules(before, after),
+               "Release schedules, start on the left and found on the right, on the same axes."),
+    ]
+    if rows_before is not None and rows_after is not None:
+        parts.append(figure(figures.compare_signals(before, rows_before, rows_after),
+                            "Mean received signal of each codebook, from its own dataset: the molecules absorbed so "
+                            "far, averaged over each symbol's runs. Curves further apart are easier to tell apart."))
+    if metrics_before and metrics_after:
+        rows = []
+        for name in metrics_before:
+            if name not in metrics_after:
+                continue
+            a, b = metrics_before[name], metrics_after[name]
+            rows.append([NAMES[name], f"{a['plain']['accuracy']:.1%} → {b['plain']['accuracy']:.1%}",
+                         f"{a['rescaled']['ba_bound_bits']:.3f} → {b['rescaled']['ba_bound_bits']:.3f}",
+                         f"{b['rescaled']['ba_bound_bits'] - a['rescaled']['ba_bound_bits']:+.3f}"])
+        parts += ["<h3>Decoders, start → found</h3>",
+                  table(["decoder", "accuracy", "BA rescaled (bits)", "change (bits)"], rows, numeric={1, 2, 3}),
+                  '<p class="lead">From each config\'s own dataset and run: one dataset each, a quick look. '
+                  "The final evaluation below is the result to report.</p>"]
+    missing = [*missing_before, *missing_after]
+    if missing:
+        parts.append(note("For the signals and the decoders, before and after: " + " · ".join(missing)))
+    final = read_json(final_folder / "final.json")
+    if final and final.get("best") == best and "reference" not in final:
+        gains = " · ".join(f"{NAMES[name]} {g['mean']:+.3f}" for name, g in final["gains"].items())
+        higher = min(g["higher"] for g in final["gains"].values())
+        parts.append(note(f"Final evaluation: {text(best)} against the start, {gains} bits; higher on at least "
+                          f"{higher} of {final['datasets']} final datasets under every decoder. "
+                          '<a href="#final">The final evaluation</a> has the details.'))
+    parts.append("</section>")
+    shown = 1 + (rows_before is not None and rows_after is not None)
+    return "".join(parts), f"start against {best} · {count(shown, 'figure')}" + (" · some missing" if missing else "")
+
+
 def comparison_section(cfg: Config, config_path: Path) -> tuple[str, str]:
     """codebooks compared with 'compare' (compare.json), on the check datasets. Returns the section and a
     summary"""
@@ -452,7 +543,8 @@ def decisions_section(folders: list[Path]) -> tuple[str, str]:
 # --- the page --------------------------------------------------------------------------------------
 
 SECTIONS = [("setup", "Setup"), ("dataset", "Dataset"), ("decoders", "Decoders"), ("search", "Search"),
-            ("comparison", "Comparison"), ("final", "Final evaluation"), ("decisions", "Decision log")]
+            ("before-after", "Before and after"), ("comparison", "Comparison"), ("final", "Final evaluation"),
+            ("decisions", "Decision log")]
 
 
 def found_by(cfg: Config, config_path: Path) -> tuple[Path, Path] | None:
@@ -484,7 +576,8 @@ def build_report(cfg: Config, config_path: str) -> tuple[str, list[tuple[str, st
     searched, search_folder = origin or (path, own)
     final_folder = search_folder if origin and not (own / "final.json").exists() else own
     built = [setup_section(cfg), dataset_section(cfg, path), decoders_section(cfg, path),
-             search_section(path, search_folder, searched), comparison_section(cfg, path),
+             search_section(path, search_folder, searched),
+             before_after_section(searched, search_folder, final_folder), comparison_section(cfg, path),
              final_section(path, final_folder), decisions_section(list(dict.fromkeys([own, search_folder])))]
     sections = [page for page, _ in built]
     summary = [(anchor, line) for (anchor, _), (_, line) in zip(SECTIONS, built)]

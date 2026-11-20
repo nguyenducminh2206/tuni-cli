@@ -91,33 +91,63 @@ def svg(figure: Figure) -> str:
     return text[text.index("<svg"):].replace("'DejaVu Sans'", FONT)
 
 
+def schedule_panel(ax, cfg: Config, u: int, width: float, columns: int = 1) -> None:
+    """symbol u's releases on one axes: a bar at each release time, as high as its molecules, with the amounts
+    written at the tips when there are only a few bursts and room between them for the numbers (the panel is
+    one of 'columns' side by side)"""
+    encoder = cfg.encoder
+    vector = encoder.symbols[u]
+    slots = [k for k, amount in enumerate(vector) if amount]
+    ax.bar([k * encoder.slot_dt for k in slots], [vector[k] for k in slots], width=width,
+           color=symbol_color(u, encoder.n_symbols), linewidth=0)
+    points_per_second = (WIDTH * 72 - 60) / columns / cfg.channel.T          # about, along the time axis
+    gaps = [(b - a) * encoder.slot_dt * points_per_second for a, b in zip(slots, slots[1:])]
+    if len(slots) <= 3 and min(gaps, default=99) >= 16:                    # 16 pt: a 3-digit amount and air
+        for k in slots:
+            ax.annotate(str(vector[k]), (k * encoder.slot_dt, vector[k]), xytext=(0, 2), textcoords="offset points",
+                        ha="center", va="bottom", fontsize=7.5, color=SECONDARY)
+    ax.set_ylim(0, encoder.budget * 1.3)
+    ax.set_yticks([0, encoder.budget])
+    ax.set_xlim(-width, cfg.channel.T)
+    ax.grid(axis="x", visible=False)
+    plain_ticks(ax)
+
+
+def bar_width(cfg: Config) -> float:
+    """thin release bars: 60% of a slot, at most about 24 px wide"""
+    return min(0.6 * cfg.encoder.slot_dt, cfg.channel.T / 24)
+
+
 def release_schedules(cfg: Config) -> str:
     """the codebook as a picture: one row per symbol, a bar for each release at its time (slot k at
     k × slot_dt), as high as the molecules it releases. The time axis runs to T, the end of a run,
     so the picture shows how much of the run each symbol leaves for the molecules to arrive"""
-    encoder, T = cfg.encoder, cfg.channel.T
-    n = encoder.n_symbols
-    width = min(0.6 * encoder.slot_dt, T / 24)      # thin bars, at most about 24 px wide
+    n = cfg.encoder.n_symbols
     with rc_context(STYLE):
         figure = Figure(figsize=(WIDTH, 0.5 + 0.55 * n), layout="constrained")
         axes = figure.subplots(n, 1, sharex=True, sharey=True, squeeze=False)[:, 0]
-        for u, (ax, vector) in enumerate(zip(axes, encoder.symbols)):
-            slots = [k for k, amount in enumerate(vector) if amount]
-            ax.bar([k * encoder.slot_dt for k in slots], [vector[k] for k in slots], width=width,
-                   color=symbol_color(u, n), linewidth=0)
-            if len(slots) <= 3:                     # a few bursts: their sizes, at the bar tips
-                for k in slots:
-                    ax.annotate(str(vector[k]), (k * encoder.slot_dt, vector[k]), xytext=(0, 2),
-                                textcoords="offset points", ha="center", va="bottom", fontsize=7.5,
-                                color=SECONDARY)
+        for u, ax in enumerate(axes):
+            schedule_panel(ax, cfg, u, bar_width(cfg))
             ax.set_ylabel(f"symbol {u}", rotation=0, ha="right", va="center", color=INK)
-            ax.set_ylim(0, encoder.budget * 1.3)
-            ax.set_yticks([0, encoder.budget])
-            ax.grid(axis="x", visible=False)
-        axes[-1].set_xlim(-width, T)
         axes[-1].set_xlabel("release time (s)")
-        for ax in axes:
-            plain_ticks(ax)
+        return svg(figure)
+
+
+def compare_schedules(before: Config, after: Config, titles: tuple[str, str] = ("start", "found")) -> str:
+    """two codebooks of one experiment side by side: one row per symbol, the codebook before on the left and
+    after on the right, on the same time and molecule axes, so a moved burst shows as a bar in another place"""
+    n = before.encoder.n_symbols
+    with rc_context(STYLE):
+        figure = Figure(figsize=(WIDTH, 0.7 + 0.55 * n), layout="constrained")
+        figure.get_layout_engine().set(wspace=0.06)
+        axes = figure.subplots(n, 2, sharex=True, sharey=True, squeeze=False)
+        for column, (cfg, title) in enumerate(zip((before, after), titles)):
+            for u in range(n):
+                schedule_panel(axes[u, column], cfg, u, bar_width(cfg), columns=2)
+            axes[0, column].set_title(title, loc="left", fontsize=8.5, color=INK)
+            axes[-1, column].set_xlabel("release time (s)")
+        for u in range(n):
+            axes[u, 0].set_ylabel(f"symbol {u}", rotation=0, ha="right", va="center", color=INK)
         return svg(figure)
 
 
@@ -276,4 +306,31 @@ def learning_curves(curves: dict, best: str | None = None, ylabel: str = "check 
         ax.set_ylabel(ylabel)
         ax.grid(axis="x", visible=False)
         plain_ticks(ax)
+        return svg(figure)
+
+
+def compare_signals(cfg: Config, before: np.ndarray, after: np.ndarray,
+                    titles: tuple[str, str] = ("start", "found")) -> str:
+    """the mean received signal of two codebooks of one experiment side by side (before and after: their
+    datasets), on the same axes: the molecules absorbed so far, averaged over each symbol's runs. Curves that
+    lie further apart are easier for a decoder to tell apart"""
+    signals = [mean_signals(rows).cumsum(axis=1) for rows in (before, after)]
+    n = len(signals[0])
+    times = np.arange(signals[0].shape[1]) * cfg.channel.dt
+    with rc_context(STYLE):
+        figure = Figure(figsize=(WIDTH, 2.9), layout="constrained")
+        figure.get_layout_engine().set(wspace=0.06)
+        axes = figure.subplots(1, 2, sharey=True)
+        for ax, curves, title in zip(axes, signals, titles):
+            for u, curve in enumerate(curves):
+                ax.plot(times, curve, color=symbol_color(u, n), label=f"symbol {u}")
+            ax.set_title(title, loc="left", fontsize=8.5, color=INK)
+            ax.set_xlim(0, times[-1])
+            ax.set_ylim(bottom=0)
+            ax.set_xlabel("time (s)")
+            ax.grid(axis="x", visible=False)
+            plain_ticks(ax)
+        axes[0].set_ylabel("absorbed so far (mean)")
+        figure.legend(*axes[0].get_legend_handles_labels(), loc="outside upper center", ncol=min(n, 8),
+                      handlelength=1.5)
         return svg(figure)
