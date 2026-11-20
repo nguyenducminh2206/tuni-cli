@@ -1,0 +1,129 @@
+/* the mi-race report: one page, light or dark with the system. From the approved lab-report design */
+html{color-scheme:light dark}
+body{margin:0;background:light-dark(#eef0f2,#0f1012)}
+#mi-lab-report{max-width:1080px;margin:0 auto;min-height:100vh;color-scheme:light dark}
+#mi-lab-report{--lab-paper:light-dark(#fff,#181a1d);--lab-ink:light-dark(#202125,#edeef0);--lab-sub:light-dark(#595d65,#b1b6bf);--lab-rule:light-dark(#d8dadd,#3b3e44);--lab-soft:light-dark(#f4f5f6,#24272c);--lab-grid:light-dark(#e9eaec,#303339);--lab-blue:light-dark(#245bab,#91b8ed);--lab-blue-wash:light-dark(#edf3fb,#253244);--lab-mark:light-dark(#a0a4ab,#767c87);--lab-amber:light-dark(#b07800,#e0a83a);--lab-s0:light-dark(#2a78d6,#3987e5);--lab-s1:light-dark(#eb6834,#d95926);--lab-s2:light-dark(#1baf7a,#199e70);--lab-s3:light-dark(#eda100,#c98500);--lab-s4:light-dark(#e87ba4,#d55181);--lab-s5:light-dark(#008300,#0ca30c);--lab-s6:light-dark(#6250d6,#9085e9);--lab-s7:light-dark(#e34948,#e66767);--lab-row:10px;isolation:isolate;background:var(--lab-paper);color:var(--lab-ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;text-align:left}
+#mi-lab-report *{box-sizing:border-box}
+#mi-lab-report [hidden]{display:none!important}
+#mi-lab-report h1,#mi-lab-report h2,#mi-lab-report h3,#mi-lab-report p,#mi-lab-report figure{margin:0}
+#mi-lab-report h1{font:600 28px/1.25 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;letter-spacing:-.6px}
+#mi-lab-report h2{font-size:19px;line-height:1.35;font-weight:600;letter-spacing:-.25px}
+#mi-lab-report h3{font-size:14px;line-height:1.4;font-weight:600}
+#mi-lab-report button,#mi-lab-report input,#mi-lab-report select{font:inherit}
+#mi-lab-report button{color:inherit}
+#mi-lab-report .lab-inner{padding:0 30px}
+#mi-lab-report .lab-top{display:flex;gap:14px;align-items:center;min-height:48px;border-bottom:1px solid var(--lab-rule);padding:10px 112px 10px 30px;font-size:12px;background:var(--lab-soft)}
+#mi-lab-report .lab-brand{font:600 14px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--lab-ink);letter-spacing:-.3px}
+#mi-lab-report .lab-top-sep{color:var(--lab-mark)}
+#mi-lab-report .lab-top-label{color:var(--lab-sub)}
+#mi-lab-report .lab-version{margin-left:auto;color:var(--lab-sub);font:11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace}
+#mi-lab-report .lab-title-row{padding-top:26px;padding-bottom:22px;display:flex;justify-content:space-between;align-items:flex-start;gap:24px}
+#mi-lab-report .lab-path{margin-top:5px;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--lab-sub);overflow-wrap:anywhere}
+#mi-lab-report .lab-title-meta{text-align:right;color:var(--lab-sub);font-size:12px;padding-top:4px}
+#mi-lab-report .lab-title-meta p+p{margin-top:4px}
+#mi-lab-report .lab-tabs{display:flex;gap:27px;flex-wrap:wrap;border-bottom:1px solid var(--lab-rule)}
+#mi-lab-report .lab-tabs button{padding:0 0 12px;background:transparent;border:0;border-bottom:2px solid transparent;margin-bottom:-1px;font-size:13px;font-weight:500;color:var(--lab-sub);white-space:nowrap}
+#mi-lab-report .lab-tabs button[aria-selected="true"]{border-bottom-color:var(--lab-ink);color:var(--lab-ink);font-weight:600}
+#mi-lab-report .lab-tabs button:hover{color:var(--lab-ink)}
+#mi-lab-report .lab-page{padding-top:26px;padding-bottom:26px}
+#mi-lab-report .lab-section+.lab-section{margin-top:30px;padding-top:25px;border-top:1px solid var(--lab-rule)}
+#mi-lab-report .lab-section-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:7px}
+#mi-lab-report .lab-support{font-size:13px;color:var(--lab-sub)}
+#mi-lab-report .lab-aside-label{font-size:12px;color:var(--lab-sub)}
+#mi-lab-report .lab-figure-head{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin:22px 0 5px;font-size:12px}
+#mi-lab-report .lab-legend{display:flex;gap:17px;flex-wrap:wrap;color:var(--lab-sub);font-size:12px;align-items:center}
+#mi-lab-report .lab-key{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
+#mi-lab-report .lab-dot{width:8px;height:8px;border:1.5px solid var(--lab-mark);background:var(--lab-paper);border-radius:50%;display:inline-block}
+#mi-lab-report .lab-square{width:8px;height:8px;background:var(--lab-blue);display:inline-block}
+#mi-lab-report .lab-plot{width:100%;min-width:0}
+#mi-lab-report .lab-plot svg{display:block;width:100%;overflow:visible}
+#mi-lab-report .lab-plot text{font-family:inherit;fill:var(--lab-ink);font-size:12px;font-variant-numeric:tabular-nums}
+#mi-lab-report .lab-plot .lab-tick{fill:var(--lab-sub);font-size:11px}
+#mi-lab-report .lab-plot .lab-axis{stroke:var(--lab-rule);stroke-width:1}
+#mi-lab-report .lab-plot .lab-guide{stroke:var(--lab-grid);stroke-width:1}
+#mi-lab-report .lab-plot .lab-connector{stroke:var(--lab-mark);stroke-width:1.5}
+#mi-lab-report .lab-plot .lab-start-err{stroke:var(--lab-mark);stroke-width:1.5}
+#mi-lab-report .lab-plot .lab-end-err{stroke:var(--lab-blue);stroke-width:1.5}
+#mi-lab-report .lab-caption{color:var(--lab-sub);font-size:12px;line-height:1.5;margin-top:7px}
+#mi-lab-report .lab-table-scroll{overflow-x:auto;max-width:100%}
+#mi-lab-report table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums;font-size:13px}
+#mi-lab-report th{font-weight:500;color:var(--lab-sub);text-align:left;border-top:1px solid var(--lab-rule);border-bottom:1px solid var(--lab-rule);background:var(--lab-soft);font-size:12px}
+#mi-lab-report th,#mi-lab-report td{padding:var(--lab-row) 12px;vertical-align:middle}
+#mi-lab-report td{border-bottom:1px solid var(--lab-grid)}
+#mi-lab-report th:first-child,#mi-lab-report td:first-child{padding-left:10px}
+#mi-lab-report .lab-num{text-align:right;white-space:nowrap}
+#mi-lab-report .lab-table-name{font-weight:500;white-space:nowrap}
+#mi-lab-report .lab-strong{font-weight:600}
+#mi-lab-report .lab-se{color:var(--lab-sub);font-size:12px}
+#mi-lab-report .lab-result-table{margin-top:17px;min-width:520px}
+#mi-lab-report .lab-table-foot{display:flex;gap:10px 24px;justify-content:space-between;flex-wrap:wrap;margin-top:9px;font-size:12px;color:var(--lab-sub)}
+#mi-lab-report .lab-matrix-head{display:flex;gap:14px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}
+#mi-lab-report .lab-matrix-head .lab-support{margin-top:5px}
+#mi-lab-report .lab-switch{display:inline-flex;border:1px solid var(--lab-rule);border-radius:3px;overflow:hidden;align-self:flex-start}
+#mi-lab-report .lab-switch button{border:0;background:var(--lab-paper);padding:6px 12px;color:var(--lab-sub);font-size:12px;min-height:30px}
+#mi-lab-report .lab-switch button+button{border-left:1px solid var(--lab-rule)}
+#mi-lab-report .lab-switch button[aria-pressed="true"]{background:var(--lab-soft);color:var(--lab-ink);font-weight:600}
+#mi-lab-report .lab-matrices{display:grid;grid-template-columns:repeat(var(--panels,3),minmax(0,1fr));gap:30px}
+#mi-lab-report .lab-matrix-item{min-width:0}
+#mi-lab-report .lab-matrix-item h3{margin-bottom:3px}
+#mi-lab-report .lab-matrix-stat{font-size:12px;color:var(--lab-sub);margin-bottom:12px;font-variant-numeric:tabular-nums}
+#mi-lab-report .lab-matrix-axis{padding-left:20px;text-align:center;color:var(--lab-sub);font-size:11px;margin-bottom:5px}
+#mi-lab-report .lab-matrix-grid{display:grid;grid-template-columns:20px repeat(var(--n,4),minmax(0,1fr));gap:3px;font-variant-numeric:tabular-nums}
+#mi-lab-report .lab-matrix-label{font-size:12px;display:flex;align-items:center;justify-content:center;color:var(--lab-sub);height:23px}
+#mi-lab-report .lab-matrix-row{height:auto}
+#mi-lab-report .lab-matrix-cell{display:flex;align-items:center;justify-content:center;aspect-ratio:1.18;font-size:13px;color:var(--lab-ink);background:var(--lab-soft);min-width:0}
+#mi-lab-report .lab-matrix-cell.lab-zero{color:var(--lab-sub)}
+#mi-lab-report .lab-matrix-cell.lab-correct{color:light-dark(#fff,#13253f);background:color-mix(in srgb,var(--lab-blue) var(--lab-shade),var(--lab-paper));font-weight:600}
+#mi-lab-report .lab-matrix-cell.lab-error{background:color-mix(in srgb,var(--lab-blue) var(--lab-shade),var(--lab-paper))}
+#mi-lab-report .lab-matrix-note{margin-top:12px;font-size:12px;color:var(--lab-sub)}
+#mi-lab-report details{margin-top:20px;border-top:1px solid var(--lab-rule);padding-top:12px;font-size:13px}
+#mi-lab-report summary{color:var(--lab-sub);width:fit-content}
+#mi-lab-report details[open]>summary{color:var(--lab-ink)}
+#mi-lab-report .lab-notes{margin:12px 0 0;padding-left:20px;color:var(--lab-sub);font-size:12px}
+#mi-lab-report .lab-notes li{margin:6px 0}
+#mi-lab-report code,#mi-lab-report pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+#mi-lab-report pre{padding:16px;background:var(--lab-soft);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;margin:14px 0 0}
+#mi-lab-report .lab-check{display:inline-flex;gap:8px;align-items:center;font-size:12px;color:var(--lab-sub);min-height:30px}
+#mi-lab-report input[type="checkbox"]{accent-color:var(--lab-blue);width:14px;height:14px;margin:0}
+#mi-lab-report .lab-codebook-figure{margin-top:23px}
+#mi-lab-report .lab-codebook-figure .lab-figure-head{margin-top:0}
+#mi-lab-report .lab-codebook-table{margin-top:22px;min-width:570px}
+#mi-lab-report .lab-codebook-table td{font-size:12px}
+#mi-lab-report .lab-release-schedule{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;line-height:1.7}
+#mi-lab-report .lab-changed-note{color:var(--lab-sub);font-size:11px;margin-left:8px;font-weight:400}
+#mi-lab-report .lab-run-table{margin-top:23px;min-width:650px}
+#mi-lab-report .lab-selected td{background:var(--lab-blue-wash);border-bottom-color:var(--lab-rule)}
+#mi-lab-report .lab-selected td:first-child{box-shadow:inset 3px 0 0 var(--lab-blue)}
+#mi-lab-report .lab-run-selected{font-size:11px;color:var(--lab-sub);font-weight:400;margin-left:7px}
+#mi-lab-report .lab-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:28px 48px;margin-top:23px}
+#mi-lab-report .lab-facts dl{margin:10px 0 0}
+#mi-lab-report .lab-facts dl>div{display:grid;grid-template-columns:1fr auto;gap:18px;border-bottom:1px solid var(--lab-grid);padding:7px 0;font-size:13px}
+#mi-lab-report dt{color:var(--lab-sub)}
+#mi-lab-report dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+#mi-lab-report .lab-select-label{font-size:12px;color:var(--lab-sub);display:inline-flex;align-items:center;gap:8px}
+#mi-lab-report select{border:1px solid var(--lab-rule);background:var(--lab-paper);color:var(--lab-ink);padding:5px 24px 5px 8px;border-radius:3px;font-size:12px;max-width:100%}
+#mi-lab-report .lab-baseline-table{margin-top:18px;min-width:620px}
+#mi-lab-report .lab-session{margin-top:20px}
+#mi-lab-report .lab-session>summary{font-weight:500}
+#mi-lab-report .lab-session-time{font-size:12px;color:var(--lab-sub);font-weight:400;margin-left:14px}
+#mi-lab-report .lab-decision-row{display:grid;grid-template-columns:43px minmax(0,1fr) 56px;gap:12px;padding:12px 0;border-bottom:1px solid var(--lab-grid);align-items:start;font-size:13px}
+#mi-lab-report .lab-decision-time{font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--lab-sub)}
+#mi-lab-report .lab-decision-answer{text-align:right;font-weight:500}
+#mi-lab-report .lab-decision-how{display:block;font-size:11px;font-weight:400;color:var(--lab-sub)}
+#mi-lab-report .lab-footer{padding:14px 0 18px;display:flex;gap:10px 24px;justify-content:space-between;flex-wrap:wrap;border-top:1px solid var(--lab-rule);font-size:11px;color:var(--lab-sub)}
+
+#mi-lab-report .lab-matrix-controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+#mi-lab-report .lab-matrix-cell.lab-quiet{font-size:0}
+#mi-lab-report .lab-swatch{width:14px;height:2px;display:inline-block;border-radius:1px}
+#mi-lab-report .lab-plot .lab-zero{stroke:var(--lab-sub);stroke-width:1}
+#mi-lab-report .lab-plot .lab-group{font-weight:600}
+#mi-lab-report .lab-note{margin:14px 0 0;padding:10px 14px;background:var(--lab-soft);border-left:3px solid var(--lab-mark);font-size:13px;color:var(--lab-sub)}
+#mi-lab-report .lab-note.lab-warn{border-left-color:var(--lab-amber);color:var(--lab-ink)}
+#mi-lab-report .lab-note code{color:var(--lab-ink)}
+#mi-lab-report .lab-section h3+.lab-table-scroll,#mi-lab-report .lab-section h3+.lab-support{margin-top:6px}
+#mi-lab-report .lab-section h3{margin-top:24px}
+#mi-lab-report .lab-section .lab-section-head h3,#mi-lab-report .lab-section>h3:first-child{margin-top:0}
+#mi-lab-report .lab-plain{margin-top:14px;min-width:0}
+#mi-lab-report .lab-codebook-cell{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+#mi-lab-report.lab-printing .lab-page[hidden]{display:block!important}
+@media print{html{color-scheme:light}body{background:#fff}#mi-lab-report .lab-tabs,#mi-lab-report .lab-switch,#mi-lab-report .lab-select-label,#mi-lab-report .lab-check{display:none}#mi-lab-report .lab-inner{padding:0}#mi-lab-report .lab-page[hidden]{display:block!important}#mi-lab-report .lab-section{break-inside:avoid}#mi-lab-report details{display:block}}
