@@ -38,6 +38,7 @@ from mi_race.streams import random_stream
 from mi_race.symbols import SymbolError, ask_symbols, parse_vector, write_symbols
 
 DECODER_NAMES = {"random_forest": "random forest", "mlp": "MLP", "cnn": "CNN"}
+FINALS = 10             # final datasets: the reported result, as in the 8g protocol (ENCODER_PLAN 12.1)
 UNITS = {"random_forest": "trees", "mlp": "epochs", "cnn": "epochs"}       # what a decoder's progress counts
 
 
@@ -895,13 +896,30 @@ def check_table(means: dict, decoders: list) -> str:
     return "\n".join([ui.INDENT + ui.paint(line(header), ui.DIM, color())] + [ui.INDENT + line(row) for row in rows])
 
 
-def found_config(config_path: str, symbols) -> tuple[Path, dict]:
-    """the config of a found codebook: the same config with these symbols, its own data file and output
-    folder, named after the config: configs/NAME-found.json, data/NAME-found.csv, outputs/NAME-found.
-    Checked by every rule before it is returned. Returns its path and the raw config"""
+def mean_bits(scores: dict) -> tuple[list, dict, dict]:
+    """from compare_codebooks: the decoders, each codebook's BA bound per dataset under each decoder,
+    and its mean"""
+    decoders = list(next(iter(scores.values()))[0])
+    bits = {label: {name: [result[name]["ba_bound_bits"] for result in results] for name in decoders}
+            for label, results in scores.items()}
+    means = {label: {name: float(np.mean(values)) for name, values in by_decoder.items()}
+             for label, by_decoder in bits.items()}
+    return decoders, bits, means
+
+
+def gain_facts(gains: dict) -> list[tuple[str, str]]:
+    """one fact per decoder: a paired gain over the start, its se, and on how many datasets it is higher"""
+    return [(DECODER_NAMES[name], f"{gain['mean']:+.3f} ± {gain['se']:.3f} bits over the start · higher on "
+                                  f"{gain['higher']} of {gain['datasets']}") for name, gain in gains.items()]
+
+
+def found_config(config_path: str, searched_raw: dict, symbols) -> tuple[Path, dict]:
+    """the config of a found codebook: the config the search ran with (searched_raw, as saved in search.json)
+    with these symbols, its own data file and output folder, named after the config: configs/NAME-found.json,
+    data/NAME-found.csv, outputs/NAME-found. Checked by every rule. Returns its path and the raw config"""
     path = Path(config_path)
     name = f"{path.stem}-found"
-    raw = read_config_file(path)
+    raw = copy.deepcopy(searched_raw)
     raw["encoder"]["symbols"] = [list(vector) for vector in symbols]
     raw["data"]["path"] = f"data/{name}.csv"
     raw.setdefault("output", {})["dir"] = f"outputs/{name}"
@@ -922,13 +940,10 @@ def check_found(cfg: Config, config_path: str, output: Path, record: dict, log: 
     if not found:
         print(ui.info("no run moved from the start codebook · nothing to check", color()))
         return
-    with ui.Progress("check", "codebooks checked", unit="datasets") as bar:
+    distinct = len(set(codebooks.values()))                        # a codebook found twice is scored once
+    with ui.Progress("check", "codebooks checked", unit=f"datasets, {distinct} codebooks × {CHECKS}") as bar:
         scores = compare_codebooks(cfg, codebooks, "check_data", CHECKS, rescaled=True, progress=bar)
-    decoders = list(scores["start"][0])
-    bits = {label: {name: [result[name]["ba_bound_bits"] for result in results] for name in decoders}
-            for label, results in scores.items()}
-    means = {label: {name: float(np.mean(values)) for name, values in by_decoder.items()}
-             for label, by_decoder in bits.items()}
+    decoders, bits, means = mean_bits(scores)
     best = max(found, key=lambda label: np.mean(list(means[label].values())))     # the first of any tie
     gains = {name: paired_gain(scores, best, "start", name) for name in decoders}
     record["check"] = {"job": "check_data", "datasets": CHECKS, "rescaled": True,
@@ -942,17 +957,14 @@ def check_found(cfg: Config, config_path: str, output: Path, record: dict, log: 
     label_width = max(len("codebook"), *(len(DECODER_NAMES[name]) for name in decoders))
     text = wrap_codebook(codebook_text(codebooks[best]), ui.WIDTH - len(ui.INDENT) - label_width - 2)
     print(ui.section("best found", f"{best} · the highest mean over the decoders", ui.facts(
-        [("codebook", text[0]), *[("", line) for line in text[1:]]] +
-        [(DECODER_NAMES[name], f"{gain['mean']:+.3f} ± {gain['se']:.3f} bits over the start · higher on "
-                               f"{gain['higher']} of {gain['datasets']}") for name, gain in gains.items()],
-        color()), color()))
+        [("codebook", text[0]), *[("", line) for line in text[1:]]] + gain_facts(gains), color()), color()))
     print()
     worse = [DECODER_NAMES[name] for name, gain in gains.items() if gain["mean"] <= 0]
     if worse:
         print(ui.warning(f"{best} is not better than the start under {' and '.join(worse)}", color()))
     else:
         print(ui.done(f"{best} is better than the start", "under every decoder", color=color()))
-    path, raw = found_config(config_path, codebooks[best])
+    path, raw = found_config(config_path, record["config"], codebooks[best])
     question = (f"Replace {path} with a config for it?" if path.exists() else
                 f"Write {path}, a config for it?")
     evidence = {"datasets": CHECKS, "best": best, "symbols": [list(v) for v in codebooks[best]],
@@ -967,6 +979,47 @@ def check_found(cfg: Config, config_path: str, output: Path, record: dict, log: 
     print()
     print(ui.done("found config written", str(path), color=color()))
     print(ui.facts([("data", raw["data"]["path"]), ("output", raw["output"]["dir"])], color()))
+
+
+def final_evaluation(cfg: Config, config_path: str, output: Path, record: dict, log: DecisionLog) -> None:
+    """step 5: the reported result. The start and the best found codebook (chosen on the check datasets)
+    under every rescaled decoder of the config, on the final datasets (final_data), never used before.
+    They are used once: the question's default is no, and a second evaluation is refused while
+    output.dir/final.json is there. Saved to final.json, with every metric of every dataset"""
+    final = output.with_name("final.json")
+    if final.exists():
+        print(ui.info(f"final evaluation already done · {final} · the final datasets are used once", color()))
+        return
+    best = record["check"]["best"]
+    codebooks = {"start": record["check"]["codebooks"]["start"], best: record["check"]["codebooks"][best]}
+    print(ui.section("final evaluation", "the result to report", ui.facts([
+        ("codebooks", f"start and {best}, the best on the check datasets"),
+        ("datasets", f"{FINALS} final datasets, never used before · every rescaled decoder"),
+        ("once", "after it, the final datasets are spent"), ("file", str(final))], color()), color()))
+    print()
+    evidence = {"codebooks": codebooks, "datasets": FINALS}
+    if not log.ask("final", f"Run the final evaluation now, on the {FINALS} final datasets?", evidence=evidence,
+                   proposal={"file": str(final)}, yes=False):
+        print(ui.info("final datasets not used · they stay for a later final evaluation", color()))
+        return
+    print()
+    with ui.Progress("final", "final evaluation done", unit=f"datasets, {len(codebooks)} codebooks × {FINALS}") as bar:
+        scores = compare_codebooks(cfg, codebooks, "final_data", FINALS, rescaled=True, progress=bar)
+    decoders, bits, means = mean_bits(scores)
+    gains = {name: paired_gain(scores, best, "start", name) for name in decoders}
+    write_json(final, {"mi_race": __version__, "created": datetime.now().isoformat(timespec="seconds"),
+                       "config_file": config_path, "config": read_config_file(config_path), "seed": cfg.seed,
+                       "job": "final_data", "datasets": FINALS, "rescaled": True, "search": str(output),
+                       "codebooks": codebooks, "best": best, "ba_bound_bits": bits, "gains": gains,
+                       "scores": scores})
+    record["final_file"] = str(final)
+    write_json(output, record)
+    print()
+    print(ui.section("final", f"every rescaled decoder on {FINALS} final datasets · BA bound in bits",
+                     check_table(means, decoders) + "\n\n" + ui.facts(gain_facts(gains), color()), color()))
+    print()
+    print(ui.done("final evaluation saved", f"{FINALS} datasets", size(final), color=color()))
+    print(ui.facts([("file", str(final.resolve()))], color()))
 
 
 def ask_search_settings(cfg: Config, config_path: str) -> Config:
@@ -990,7 +1043,7 @@ def run_search(args) -> int:
     output.dir/decisions.json, the runs to output.dir/search.json.
     Step 0: the settings, typed (at a terminal, without --yes). Step 1: the threshold, from the noise of the
     feedback. Step 2: the runs. Step 3: more steps for the runs still improving. Step 4: the found codebooks
-    checked against the start, and the best one's config proposed"""
+    checked against the start, and the best one's config proposed. Step 5: the final evaluation, once"""
     print(ui.heading("search", args.config, color()))
     print()
     cfg = load_config(args.config)
@@ -1025,8 +1078,83 @@ def run_search(args) -> int:
     print()
     check_found(cfg, args.config, output, record, log)
     print()
+    if "check" in record:
+        final_evaluation(cfg, args.config, output, record, log)
+        print()
     print(ui.done("search saved", f"{len(runs)} runs", size(output), color=color()))
     print(ui.facts([("file", str(output.resolve()))], color()))
+    return 0
+
+
+def read_search(output: Path) -> dict:
+    """a search.json written by 'search', or ConfigError if there is none, or it is not one"""
+    if not output.exists():
+        raise ConfigError(f"{output} does not exist: no search has been run with this config")
+    try:
+        record = json.loads(output.read_text(encoding="utf-8"))
+    except ValueError:
+        record = None
+    if not isinstance(record, dict) or not {"config", "runs"} <= record.keys():
+        raise ConfigError(f"{output} is not a search result written by 'search'")
+    return record
+
+
+def searched(config_path: str) -> tuple[str, Path]:
+    """the search a config belongs to: its config file and search.json. Either the config was searched itself
+    (its output folder holds search.json), or it is the found config a search wrote: configs/NAME-found.json
+    comes from configs/NAME.json, and holds the best codebook of that search's check"""
+    path = Path(config_path)
+    output = Path(load_config(path).output.dir) / "search.json"
+    if output.exists() or not path.stem.endswith("-found"):
+        return config_path, output
+    origin = path.with_name(f"{path.stem.removesuffix('-found')}.json")
+    if not origin.exists():
+        raise ConfigError(f"{path} looks like a found config, but {origin}, the config it came from, is gone")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")                             # shown when the search's config is read
+        origin_output = Path(load_config(origin).output.dir) / "search.json"
+    record = read_search(origin_output)
+    check = record.get("check")
+    if check is None or check["codebooks"][check["best"]] != read_config_file(path)["encoder"]["symbols"]:
+        raise ConfigError(f"{path} is not the best codebook of the search in {origin_output}: "
+                          f"'final {origin}' evaluates that search")
+    return str(origin), origin_output
+
+
+def run_final(args) -> int:
+    """mi-race final CONFIG: the final evaluation of a search that stopped before it (search step 5): the start
+    against the best found codebook, under every rescaled decoder, on the final datasets, once. CONFIG is the
+    searched config, or the NAME-found.json its search wrote. The search's own config is used, as saved in
+    search.json; if the search stopped before its check, the check (step 4) runs first"""
+    print(ui.heading("final", args.config, color()))
+    print()
+    config_path, output = searched(args.config)
+    record = read_search(output)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")                             # the same warnings as the file's, below
+        cfg = parse_config(record["config"])
+    if load_config(config_path) != cfg:
+        print(ui.warning(f"{config_path} changed since the search: the config the search ran with is used, "
+                         f"as saved in {output}", color()))
+        print()
+    final = output.with_name("final.json")
+    if final.exists():
+        raise ConfigError(f"the final evaluation is already done · {final} · the final datasets are used once")
+    if not record["runs"]:
+        raise ConfigError(f"{output} has no finished run: search {config_path} again")
+    kept = sum(len(kept_steps(run)) for run in record["runs"])
+    print(ui.facts([("search", f"{config_path} · {len(record['runs'])} runs · {kept} moves kept"),
+                    ("results", f"{output} · {Path(cfg.output.dir) / 'decisions.json'}")], color()))
+    print()
+    log = DecisionLog(cfg.output.dir, "final", config_path)
+    if "check" not in record:                                       # stopped before step 4: check first
+        print(ui.info("the search stopped before its check · checking the found codebooks first", color()))
+        print()
+        check_found(cfg, config_path, output, record, log)
+        print()
+        if "check" not in record:
+            return 0
+    final_evaluation(cfg, config_path, output, record, log)
     return 0
 
 
@@ -1076,6 +1204,10 @@ def build_parser() -> Parser:
     guided.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/my-channel.json")
     guided.add_argument("--yes", action="store_true", help="take every default answer, e.g. in a batch job")
     guided.set_defaults(run=run_search)
+
+    final = commands.add_parser("final", help="the final evaluation of a search, once")
+    final.add_argument("config", metavar="CONFIG", help="the searched config, or the NAME-found.json it wrote")
+    final.set_defaults(run=run_final)
 
     check = commands.add_parser("check", help="check a config against every rule and show what it sets up")
     check.add_argument("config", metavar="CONFIG", help="the config file, e.g. configs/example.json")
