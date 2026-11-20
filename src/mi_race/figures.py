@@ -7,8 +7,9 @@ import io
 
 import numpy as np
 from matplotlib import rc_context
+from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.figure import Figure
-from matplotlib.ticker import MaxNLocator, StrMethodFormatter
+from matplotlib.ticker import MaxNLocator, NullFormatter, StrMethodFormatter
 
 from mi_race.config import Config
 from mi_race.dataset import mean_signals
@@ -21,6 +22,9 @@ GRID = "#e1e0d9"                            # hairline gridlines
 AXIS = "#c3c2b7"                            # the baseline
 SERIES = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",            # one colour per symbol, always in this order
           "#e87ba4", "#008300", "#6250d6", "#e34948"]
+RAMP = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e5",    # one blue, light to dark:
+        "#2a78d6", "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"]               # for shares, none to all
+DECODERS = {"random_forest": "random forest", "mlp": "MLP", "cnn": "CNN"}     # as in cli; a colour each, in order
 FONT = "system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif"   # the page's own sans
 WIDTH = 7.2                                 # inches: 518 pt, the report's column
 OVERLAY = 4                                 # at most this many signals share one plot; more get a panel each
@@ -50,6 +54,8 @@ STYLE = {
     "ytick.labelsize": 8,
     "xtick.major.size": 0,                  # gridlines instead of ticks
     "ytick.major.size": 0,
+    "xtick.minor.size": 0,
+    "ytick.minor.size": 0,
     "lines.linewidth": 1.5,                 # 2 px on the page
     "lines.solid_capstyle": "round",
     "lines.solid_joinstyle": "round",
@@ -64,13 +70,21 @@ def symbol_color(u: int, n_symbols: int) -> str:
     return SERIES[u] if n_symbols <= len(SERIES) else SERIES[0]
 
 
+def decoder_color(name: str) -> str:
+    """the colour of a decoder, the same in every figure: random forest, MLP, CNN take the first three"""
+    return SERIES[list(DECODERS).index(name)]
+
+
+def plain_ticks(ax) -> None:
+    """ticks as plain numbers (0, 0.5, 1; 0.001 on a log scale), at most 6 along the x axis"""
+    ax.xaxis.set_major_locator(MaxNLocator(6, steps=[1, 2, 2.5, 5, 10]))
+    ax.xaxis.set_major_formatter(StrMethodFormatter("{x:g}"))
+    ax.yaxis.set_major_formatter(StrMethodFormatter("{x:g}"))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+
+
 def svg(figure: Figure) -> str:
-    """the figure as SVG text, without the XML header, ready to sit in an HTML page. Ticks are plain numbers
-    (0, 0.5, 1), at most 6 on an axis"""
-    for ax in figure.axes:
-        ax.xaxis.set_major_locator(MaxNLocator(6, steps=[1, 2, 2.5, 5, 10]))
-        ax.xaxis.set_major_formatter(StrMethodFormatter("{x:g}"))
-        ax.yaxis.set_major_formatter(StrMethodFormatter("{x:g}"))
+    """the figure as SVG text, without the XML header, ready to sit in an HTML page"""
     out = io.StringIO()
     figure.savefig(out, format="svg", metadata={"Date": None, "Creator": None})
     text = out.getvalue()
@@ -102,6 +116,8 @@ def release_schedules(cfg: Config) -> str:
             ax.grid(axis="x", visible=False)
         axes[-1].set_xlim(-width, T)
         axes[-1].set_xlabel("release time (s)")
+        for ax in axes:
+            plain_ticks(ax)
         return svg(figure)
 
 
@@ -119,7 +135,7 @@ def mean_signal(cfg: Config, rows: np.ndarray) -> str:
             ax = figure.subplots()
             for u, signal in enumerate(signals):
                 ax.plot(times, signal, color=symbol_color(u, n), label=f"symbol {u}")
-            name_ends(ax, times, signals)
+            name_ends(ax, times[-1], {f"symbol {u}": signal[-1] for u, signal in enumerate(signals)})
             ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=n, handlelength=1.5)
             axes = [ax]
         else:
@@ -137,19 +153,84 @@ def mean_signal(cfg: Config, rows: np.ndarray) -> str:
             ax.set_xlim(0, times[-1])
             ax.set_ylim(bottom=0)
             ax.grid(axis="x", visible=False)
+            plain_ticks(ax)
         figure.supxlabel("time (s)", fontsize=9, color=SECONDARY)
         figure.supylabel(f"absorbed so far (mean of {len(rows) // n} runs)", fontsize=9, color=SECONDARY)
         return svg(figure)
 
 
-def name_ends(ax, times: np.ndarray, signals: np.ndarray) -> None:
-    """'symbol u' just right of each curve's end, so a symbol is named on the plot as well as in the legend;
-    a name that would overlap another one is left to the legend"""
+def name_ends(ax, x: float, ends: dict, log: bool = False) -> None:
+    """each curve's name just right of its end (ends: name -> the curve's last value), so it is named on the
+    plot as well as in the legend; a name that would overlap another one is left to the legend.
+    log: the y axis is logarithmic, so closeness is measured in decades"""
+    scale = (lambda y: np.log10(max(y, 1e-12))) if log else (lambda y: y)
+    span = (max(map(scale, ends.values())) - min(map(scale, ends.values()))) if log else max(ends.values())
     placed = []
-    for u in np.argsort(-signals[:, -1]):
-        y = signals[u, -1]
-        if any(abs(y - other) < 0.07 * signals.max() for other in placed):
+    for name, y in sorted(ends.items(), key=lambda item: -item[1]):
+        if any(abs(scale(y) - scale(other)) < 0.07 * (span or 1) for other in placed):
             continue
-        ax.annotate(f"symbol {u}", (times[-1], y), xytext=(4, 0), textcoords="offset points", va="center",
-                    fontsize=7.5, color=SECONDARY, annotation_clip=False)
+        ax.annotate(name, (x, y), xytext=(4, 0), textcoords="offset points", va="center", fontsize=7.5,
+                    color=SECONDARY, annotation_clip=False)
         placed.append(y)
+
+
+def training_loss(losses: dict) -> str | None:
+    """how the network decoders learned: each one's training loss after every epoch (the mean cross-entropy,
+    in nats, over the training runs), on a log scale so the late epochs show as well as the first.
+    losses: decoder -> its losses, as in metrics.json. The forest has no epochs and is left out; None if
+    no decoder has any"""
+    curves = {name: np.maximum(values, 1e-12) for name, values in losses.items() if values}
+    if not curves:
+        return None
+    with rc_context(STYLE):
+        figure = Figure(figsize=(WIDTH, 2.6), layout="constrained")
+        ax = figure.subplots()
+        for name, values in curves.items():
+            ax.plot(np.arange(1, len(values) + 1), values, color=decoder_color(name), label=DECODERS[name])
+        last = max(len(values) for values in curves.values())
+        name_ends(ax, last, {DECODERS[name]: values[-1] for name, values in curves.items()}, log=True)
+        if len(curves) > 1:
+            ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=len(curves), handlelength=1.5)
+        ax.set_yscale("log")
+        ax.set_xlim(1, last)
+        ax.set_xlabel("epoch")
+        ax.set_ylabel("training loss (nats)")
+        ax.grid(axis="x", visible=False)
+        plain_ticks(ax)
+        return svg(figure)
+
+
+def confusion_matrices(matrices: dict) -> str:
+    """what each decoder decided, against what was sent: one panel per decoder (matrices: decoder -> its
+    confusion matrix, rows the symbol sent, columns the symbol decided). A cell is shaded by its share of the
+    row, from light blue (none) to dark (all), so a dark diagonal means right decisions; up to 8 symbols the
+    cell also shows its count of test runs. The panel title gives the share decided right"""
+    cmap = LinearSegmentedColormap.from_list("share", RAMP)
+    with rc_context(STYLE | {"axes.grid": False}):
+        figure = Figure(figsize=(WIDTH, 2.9), layout="constrained")
+        axes = figure.subplots(1, len(matrices), squeeze=False)[0]
+        for ax, (name, matrix) in zip(axes, matrices.items()):
+            counts = np.asarray(matrix)
+            n = len(counts)
+            shares = counts / np.maximum(counts.sum(axis=1, keepdims=True), 1)
+            image = ax.pcolormesh(shares, cmap=cmap, vmin=0, vmax=1, edgecolors=SURFACE, linewidth=1.5)
+            if n <= 8:
+                for i in range(n):
+                    for j in range(n):
+                        ax.text(j + 0.5, i + 0.5, str(counts[i, j]), ha="center", va="center", fontsize=7.5,
+                                color="#ffffff" if shares[i, j] > 0.5 else INK)
+            ax.set_aspect("equal")
+            ax.set_xlim(0, n)
+            ax.set_ylim(n, 0)                                       # symbol 0 at the top
+            ticks = np.arange(n) + 0.5
+            ax.set_xticks(ticks, [str(j) for j in range(n)])
+            ax.set_yticks(ticks, [str(i) for i in range(n)])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            ax.set_xlabel("decided")
+            ax.set_ylabel("sent")
+            ax.set_title(f"{DECODERS[name]} · {np.trace(counts) / counts.sum():.1%} right", loc="left",
+                         fontsize=8.5, color=INK)
+        if max(len(matrix) for matrix in matrices.values()) > 8:   # no counts in the cells: a scale instead
+            figure.colorbar(image, ax=list(axes), shrink=0.8, label="share of the row").outline.set_visible(False)
+        return svg(figure)
