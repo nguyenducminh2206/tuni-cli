@@ -31,4 +31,4 @@ pythonpath = ["src"]
 addopts = "-q"
 
 [tool.setuptools.package-data]
-mi_race = ["templates/*.json"]
+mi_race = ["templates/*.json", "templates/*.css", "templates/*.js"]
