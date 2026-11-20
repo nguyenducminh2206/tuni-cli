@@ -7,6 +7,24 @@ A transmitter sends a symbol by releasing molecules. The molecules diffuse along
 1. How much information does the received signal carry about the symbol that was sent?
 2. Which symbols carry the most information when every symbol releases the same number of molecules?
 
+## Quick start
+
+```bash
+pip install -e .                 # from this folder: Python 3.10 or newer
+mi-race                          # opens the mi-race shell; 'help' lists the commands
+```
+
+In the shell, a first experiment takes four commands:
+
+```text
+new my-channel                   # asks for the settings, Enter keeps each default
+simulate configs/my-channel.json # the dataset: every symbol through the channel
+run configs/my-channel.json      # trains and scores the decoders
+report configs/my-channel.json   # one HTML page with every result
+```
+
+Section 12 explains every command.
+
 ## Contents
 
 1. [System model](#1-system-model)
@@ -20,8 +38,9 @@ A transmitter sends a symbol by releasing molecules. The molecules diffuse along
 9. [Example experiment](#9-example-experiment)
 10. [Validation](#10-validation)
 11. [Status](#11-status)
-12. [Software](#12-software)
-13. [References](#references)
+12. [Using mi-race](#12-using-mi-race)
+13. [Software](#13-software)
+14. [References](#references)
 
 ## 1. System model
 
@@ -423,11 +442,88 @@ The notebook `notebooks/channel.ipynb` walks through the channel step by step. I
 - information measures and temperature rescaling;
 - encoder search with checks, learning curves and a choice of decoder as feedback.
 
-**Done:** experiments to choose the search settings (section 7.5) and the final evaluation (section 7.6).
+**Done:**
 
-## 12. Software
+- experiments to choose the search settings (section 7.5) and the final evaluation (section 7.6);
+- the `mi-race` command, with the guided search and the HTML report (section 12).
 
-Python 3.10 or newer, with NumPy, scikit-learn and PyTorch. Everything runs on the CPU.
+## 12. Using mi-race
+
+`mi-race` alone opens the mi-race shell, where commands are typed one after another. `mi-race COMMAND …`
+runs one command and exits, for scripts and batch jobs. Every command takes a config file and works in
+the folder it is run from.
+
+### 12.1 Commands
+
+| Command | What it does | Writes |
+| --- | --- | --- |
+| `new NAME` | asks for the settings of a new experiment, each checked as it is typed, then the symbols | `configs/NAME.json` |
+| `new NAME --from CONFIG` | copies CONFIG and asks only for its symbols | `configs/SOURCE-NAME.json` |
+| `edit CONFIG` | opens the config in nano (or `$EDITOR`), then checks it | the config |
+| `symbols CONFIG` | types a new codebook into a config, symbol by symbol | the config |
+| `check CONFIG` | checks every rule and shows what the config sets up | nothing |
+| `simulate CONFIG` | simulates the dataset: every symbol, `runs_per_symbol` times | `data.path` |
+| `run CONFIG` | trains and scores every decoder, plain and rescaled | `metrics.json` |
+| `search CONFIG` | the guided search for a better codebook (12.3) | `search.json`, `decisions.json`, … |
+| `compare CONFIG OTHER …` | codebooks side by side on the check datasets | `compare.json` |
+| `final CONFIG [OTHER …]` | the final evaluation, once (12.3, 12.4) | `final.json` |
+| `report CONFIG` | one HTML page with every result so far | `report.html` |
+
+Result files go into the config's output folder, `output.dir` (for `configs/NAME.json`, normally
+`outputs/NAME`). Each one records the config, the seed and the mi-race version that made it.
+
+### 12.2 Questions
+
+- **Values** show their default in brackets: `T  recording time · s [2] ›`. Enter keeps it. A typed value is
+  checked at once against every rule of the config, and asked again, with the reason, if it breaks one.
+  When an answer makes another setting impossible (30 slots that would release after T, a budget below
+  the search chunk), that setting is adjusted and the change is said.
+- **Yes/no** questions show the default in capitals, `[Y/n]` or `[y/N]`, and Enter takes it. A step that
+  cannot be undone, such as the final evaluation, defaults to no.
+- Without a terminal (a batch job) every default is taken and printed; `search --yes` does the same at a
+  terminal. Ctrl-C stops a command without writing what it was asking about.
+
+### 12.3 Searching for a better codebook
+
+`search CONFIG` starts from the config's codebook and proposes every change with its evidence:
+
+1. **Settings:** runs, steps per run and chunk, each with Enter to keep it.
+2. **Threshold:** it measures the noise of its own score on 20 paired datasets and proposes
+   θ = 2 × sd.
+3. **Runs:** each run moves `chunk` molecules at a time and keeps a move only if it scores more than θ
+   above the codebook before it, on a new dataset each step (section 7).
+4. **More steps** for runs that kept a move in their last quarter, then each run's learning curve on the
+   check datasets.
+5. **Check:** the start and every found codebook under every rescaled decoder on the 5 check datasets.
+   The best one is offered as a new config, `configs/NAME-found.json`.
+6. **Final evaluation:** the start against the best found codebook on the 10 final datasets, once.
+
+Every question, its evidence and the answer go into `decisions.json`. A search stopped before its last
+step can be finished later with `final configs/NAME.json` or `final configs/NAME-found.json`.
+
+### 12.4 Comparing codebooks you designed
+
+1. `new spread --from configs/hand-picked.json` copies a config and asks only for the symbols, so the two
+   are the same experiment with different codebooks.
+2. `compare configs/hand-picked.json configs/hand-picked-spread.json …` scores them on the check datasets,
+   with each codebook's paired gain over the first. It can be run as often as needed.
+3. `final configs/hand-picked.json configs/hand-picked-spread.json …` scores the same codebooks on the final
+   datasets: the result to report.
+
+**The final datasets are used once.** `final` refuses to run again when a `final.json` already used them:
+in the config's own folder, or in that of the search it came from or of its found config. So name every
+codebook you want to report in one final evaluation.
+
+### 12.5 The report
+
+`report CONFIG` writes `report.html` in the output folder: the setup, the dataset, the decoders, the
+search, the codebooks before and after the search, comparisons, the final evaluation and the decision log.
+It only reads result files; a part with no results yet says which command makes it. The report of a found
+config shows the search that found it.
+
+## 13. Software
+
+Python 3.10 or newer, with NumPy, scikit-learn, PyTorch and Matplotlib. Everything runs on the CPU.
 
 | Module         | Section                                |
 | -------------- | -------------------------------------- |
@@ -440,6 +536,12 @@ Python 3.10 or newer, with NumPy, scikit-learn and PyTorch. Everything runs on t
 | `search.py`  | encoder search (7)                     |
 | `streams.py` | random streams (8)                     |
 | `symbols.py` | typing release vectors by hand         |
+| `compare.py` | codebooks under every decoder, noise of the search's score (7, 12) |
+| `decisions.py` | the decision log of the guided commands (12) |
+| `figures.py` | the report's figures                   |
+| `report.py`  | the HTML report (12.5)                 |
+| `ui.py`      | how the terminal output looks          |
+| `cli.py`     | the `mi-race` command (12)             |
 
 ## References
 
