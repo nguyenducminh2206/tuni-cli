@@ -468,18 +468,22 @@ def run_new(args) -> int:
     """mi-race new NAME: a config for a new experiment, from the example, with its own data file
     (data/NAME.csv) and output folder (outputs/NAME). At a terminal it asks for the settings that define the
     experiment, each checked as it is typed, shows the config and writes it after a yes; without one it
-    copies the example. An existing file is never overwritten"""
-    path = Path(args.folder) / f"{args.name}.json"
-    print(ui.heading("new", str(path), color()))
-    print()
+    copies the example. An existing file is never overwritten.
+    With --from CONFIG it copies that config instead, named after it (configs/SOURCE-NAME.json), and goes
+    straight to its symbols: the copy is the same experiment with another codebook, ready to 'compare' with it"""
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", args.name):
         raise ConfigError(f"'{args.name}' can't be a config name: use letters, digits, - and _")
+    name = f"{Path(args.source).stem}-{args.name}" if args.source else args.name
+    path = Path(args.folder) / f"{name}.json"
+    print(ui.heading("new", str(path), color()))
+    print()
     if path.exists():
         raise ConfigError(f"{path} already exists: pick another name, or edit that file")
-    raw = template()
-    raw["data"]["path"] = f"data/{args.name}.csv"
-    raw["output"]["dir"] = f"outputs/{args.name}"
-    if not interactive():                           # a batch job: the example, checked before it is written
+    source = load_config(args.source) if args.source else None      # a broken source stops here
+    raw = read_config_file(args.source) if args.source else template()
+    raw["data"]["path"] = f"data/{name}.csv"
+    raw.setdefault("output", {})["dir"] = f"outputs/{name}"
+    if not interactive():                           # a batch job: the example or the source, checked, written
         cfg = parse_config(raw)
         path.parent.mkdir(parents=True, exist_ok=True)
         write_config_file(path, raw)
@@ -487,11 +491,23 @@ def run_new(args) -> int:
         print()
         print(ui.done("config created", str(path), color=color()))
         print()
-        print(ui.facts([("next", f"edit {path}"), ("", f"then: check {path}")], color()))
+        print(ui.facts([("next", f"symbols {path} · to give it its own codebook")] if source else
+                       [("next", f"edit {path}"), ("", f"then: check {path}")], color()))
         return 0
-    print(ui.info("Enter keeps the value in brackets · Ctrl-C stops without writing", color()))
-    raw, cfg = ask_values(raw)
+    if source:
+        print(ui.info(f"a copy of {args.source} · only the codebook changes", color()))
+        print(ui.info("Ctrl-C stops without writing", color()))
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")                         # the source's, shown when it was loaded
+            raw, cfg = ask_codebook(raw, parse_config(raw))
+    else:
+        print(ui.info("Enter keeps the value in brackets · Ctrl-C stops without writing", color()))
+        raw, cfg = ask_values(raw)
     print()
+    if source and cfg.encoder.symbols == source.encoder.symbols:
+        print(ui.warning(f"the codebook is the same as in {args.source}: 'compare' would find no difference",
+                         color()))
+        print()
     show_config(cfg)
     print()
     if not ui.ask(f"Write {path}?"):
@@ -510,6 +526,9 @@ def run_new(args) -> int:
         show_config(edited)
         return 0
     print()
+    if source:
+        print(ui.facts([("next", f"compare {args.source} {path}"), ("", f"or: simulate {path}")], color()))
+        return 0
     print(ui.facts([("next", f"simulate {path}"), ("", f"or: edit {path} · for the decoders and search")], color()))
     return 0
 
@@ -1348,8 +1367,10 @@ def build_parser() -> Parser:
     parser.add_argument("--version", action="version", version=f"mi-race {__version__}")
     commands = parser.add_subparsers(dest="command", metavar="COMMAND")
 
-    new = commands.add_parser("new", help="a config for a new experiment, from the example")
+    new = commands.add_parser("new", help="a new config, from the example or --from CONFIG")
     new.add_argument("name", metavar="NAME", help="the experiment's name: letters, digits, - and _")
+    new.add_argument("--from", dest="source", metavar="CONFIG",
+                     help="copy this config as SOURCE-NAME and type only its codebook")
     new.add_argument("--folder", default="configs", help="where the config goes (default: configs)")
     new.set_defaults(run=run_new)
 
